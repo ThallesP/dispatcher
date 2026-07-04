@@ -1,0 +1,47 @@
+const usd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 2,
+});
+
+const usdCompact = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+const num = new Intl.NumberFormat("en-US");
+
+const usdWhole = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+export function fmtUsd(v: number): string {
+  return Math.abs(v) >= 10_000 ? usdCompact.format(v) : usd.format(v);
+}
+
+/** Clean axis-tick currency: whole dollars, compact past 10K. */
+export function fmtUsdTick(v: number): string {
+  return Math.abs(v) >= 10_000 ? usdCompact.format(v) : usdWhole.format(v);
+}
+
+export function fmtNum(v: number): string {
+  return num.format(v);
+}
+
+export function fmtSignedPct(v: number): string {
+  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+}
+
+/** Compact "7d" / "26h" / "45m" distance between two instants. */
+export function fmtAgo(fromIso: string, toIso: string): string {
+  const ms = Math.abs(new Date(toIso).getTime() - new Date(fromIso).getTime());
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
