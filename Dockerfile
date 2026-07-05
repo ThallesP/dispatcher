@@ -1,5 +1,8 @@
-# Frontend: React Router SPA built to static assets in web/build/client
-FROM oven/bun:1 AS web
+# Frontend: React Router SPA built to static assets in web/build/client.
+# Bun installs deps (bun.lock), but the build must run under Node — the
+# react-router CLI breaks on the Bun runtime (babel traverse interop).
+FROM node:22-slim AS web
+COPY --from=oven/bun:1 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /src/web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile

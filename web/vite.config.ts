@@ -13,4 +13,9 @@ export default defineConfig({
       "/api": "http://localhost:8090",
     },
   },
+  // The SPA index.html generation starts a Vite preview server during build;
+  // pin it to IPv4 loopback so it also works in Docker builds without IPv6.
+  preview: {
+    host: "127.0.0.1",
+  },
 });
