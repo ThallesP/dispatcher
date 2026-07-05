@@ -1,3 +1,4 @@
+import { RefreshCw } from "lucide-react";
 import { Link, Outlet, useRevalidator } from "react-router";
 import { AutoWithdraw } from "~/components/auto-withdraw-dialog";
 import { Button } from "~/components/ui/button";
@@ -9,6 +10,7 @@ import {
   CardTitle,
 } from "~/components/ui/card";
 import { api } from "~/lib/api";
+import { useRefreshAnalytics } from "~/queries/analytics";
 import { getMe, type User } from "~/queries/me";
 import type { Route } from "./+types/protected";
 
@@ -47,6 +49,24 @@ export default function Protected({ loaderData }: Route.ComponentProps) {
   );
 }
 
+// RefreshButton collects a fresh template snapshot on demand — mainly for a
+// first sign-in, when the hourly collector hasn't produced any data yet.
+function RefreshButton() {
+  const refresh = useRefreshAnalytics();
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      aria-label="Refresh data"
+      title="Refresh data"
+      onClick={() => refresh.mutate()}
+      disabled={refresh.isPending}
+    >
+      <RefreshCw className={refresh.isPending ? "animate-spin" : undefined} />
+    </Button>
+  );
+}
+
 function Header({ user }: { user: User }) {
   const revalidator = useRevalidator();
 
@@ -62,6 +82,7 @@ function Header({ user }: { user: User }) {
           Dispatcher
         </Link>
         <div className="flex items-center gap-3">
+          <RefreshButton />
           <AutoWithdraw />
           <div className="flex items-center gap-2">
             {user.avatar && (

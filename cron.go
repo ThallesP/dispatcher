@@ -25,7 +25,7 @@ func startCrons(db *gorm.DB) *cron.Cron {
 		cron.WithLocation(time.UTC),
 		cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)),
 	)
-	if _, err := c.AddFunc(templateSnapshotSpec, func() { collectTemplateSnapshots(db) }); err != nil {
+	if _, err := c.AddFunc(templateSnapshotSpec, func() { runTemplateSnapshots(db) }); err != nil {
 		log.Fatalf("schedule template snapshots: %v", err)
 	}
 	if _, err := c.AddFunc(autoWithdrawSpec, func() { runAutoWithdraw(db) }); err != nil {
@@ -34,32 +34,38 @@ func startCrons(db *gorm.DB) *cron.Cron {
 	c.Start()
 	// Collect once at startup so the series has a point right away instead of
 	// waiting for the first tick.
-	go collectTemplateSnapshots(db)
+	go runTemplateSnapshots(db)
 	return c
 }
 
-func collectTemplateSnapshots(db *gorm.DB) {
+// runTemplateSnapshots is the cron/startup entrypoint: collect and just log
+// failures. The manual refresh endpoint calls collectTemplateSnapshots
+// directly to report the error to the client instead.
+func runTemplateSnapshots(db *gorm.DB) {
+	if err := collectTemplateSnapshots(db); err != nil {
+		log.Printf("template snapshots: %v", err)
+	}
+}
+
+func collectTemplateSnapshots(db *gorm.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	token, err := workspaceToken(ctx, db)
 	if err != nil {
-		log.Printf("template snapshots: %v", err)
-		return
+		return err
 	}
 	workspaceID, err := getProjectWorkspaceID(ctx, token)
 	if err != nil {
-		log.Printf("template snapshots: %v", err)
-		return
+		return err
 	}
 	templates, err := getWorkspaceTemplates(ctx, token, workspaceID)
 	if err != nil {
-		log.Printf("template snapshots: %v", err)
-		return
+		return err
 	}
 	if len(templates) == 0 {
 		log.Printf("template snapshots: workspace %s has no templates", workspaceID)
-		return
+		return nil
 	}
 
 	sampledAt := time.Now().UTC()
@@ -79,10 +85,10 @@ func collectTemplateSnapshots(db *gorm.DB) {
 		})
 	}
 	if err := gorm.G[TemplateSnapshot](db).CreateInBatches(ctx, &snapshots, 100); err != nil {
-		log.Printf("template snapshots: insert: %v", err)
-		return
+		return err
 	}
 	log.Printf("template snapshots: stored %d templates", len(snapshots))
+	return nil
 }
 
 // autoWithdrawMu keeps runs from overlapping: the cron chain only serializes

@@ -1,4 +1,8 @@
-import { queryOptions } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { api } from "~/lib/api";
 
 export interface PayoutPoint {
@@ -63,3 +67,12 @@ export const templateAnalyticsQuery = queryOptions({
       .get("analytics/templates", { signal })
       .json<TemplateAnalyticsResponse | null>(),
 });
+
+/** Collect a fresh snapshot server-side, then refetch everything analytics. */
+export function useRefreshAnalytics() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("analytics/refresh"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["analytics"] }),
+  });
+}

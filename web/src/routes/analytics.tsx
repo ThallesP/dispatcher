@@ -19,6 +19,7 @@ import {
   summaryQuery,
   type TemplateAnalytics,
   templateAnalyticsQuery,
+  useRefreshAnalytics,
 } from "~/queries/analytics";
 import type { Route } from "./+types/analytics";
 
@@ -57,14 +58,7 @@ export default function Analytics() {
           Failed to load analytics — is the API up?
         </p>
       )}
-      {summary.isSuccess && !hasData && (
-        <Card>
-          <CardContent className="text-sm text-muted-foreground">
-            No snapshots yet. The collector runs hourly — data appears after
-            the first run.
-          </CardContent>
-        </Card>
-      )}
+      {summary.isSuccess && !hasData && <EmptyState />}
 
       {summary.data && (
         <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -165,6 +159,30 @@ export default function Analytics() {
 }
 
 // Skeletons mirror the real layout so nothing jumps when data lands.
+// EmptyState shows before the first snapshot exists (fresh sign-in) and lets
+// the user collect one now instead of waiting for the hourly cron.
+function EmptyState() {
+  const refresh = useRefreshAnalytics();
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-start gap-3">
+        <p className="text-sm text-muted-foreground">
+          No snapshots yet. The collector runs hourly, or you can grab the
+          first one right now.
+        </p>
+        <Button onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+          {refresh.isPending ? "Refreshing…" : "Refresh now"}
+        </Button>
+        {refresh.isError && (
+          <p className="text-sm text-(--viz-critical)">
+            Couldn&apos;t refresh — check the server logs and try again.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function DashboardSkeleton() {
   return (
     <>
