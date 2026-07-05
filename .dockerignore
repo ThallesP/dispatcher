@@ -1,0 +1,9 @@
+.git
+.env
+dispatcher
+*.duckdb
+*.duckdb.wal
+*.log
+web/node_modules
+web/build
+web/.react-router
