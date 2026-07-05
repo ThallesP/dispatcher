@@ -32,6 +32,11 @@ export function fmtNum(v: number): string {
   return num.format(v);
 }
 
+/** Format an integer cent amount as USD. */
+export function fmtCents(cents: number): string {
+  return usd.format(cents / 100);
+}
+
 export function fmtSignedPct(v: number): string {
   return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 }

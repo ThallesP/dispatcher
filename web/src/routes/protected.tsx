@@ -1,4 +1,5 @@
 import { Link, Outlet, useRevalidator } from "react-router";
+import { AutoWithdraw } from "~/components/auto-withdraw-dialog";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -61,6 +62,7 @@ function Header({ user }: { user: User }) {
           Dispatcher
         </Link>
         <div className="flex items-center gap-3">
+          <AutoWithdraw />
           <div className="flex items-center gap-2">
             {user.avatar && (
               <img

@@ -29,6 +29,9 @@ func main() {
 	mux.Handle("GET /api/analytics/payout", requireAuth(handlePayoutSeries(db)))
 	mux.Handle("GET /api/analytics/summary", requireAuth(handleAnalyticsSummary(db)))
 	mux.Handle("GET /api/analytics/templates", requireAuth(handleTemplateAnalytics(db)))
+	mux.Handle("GET /api/withdraw/settings", requireAuth(handleWithdrawSettings(db)))
+	mux.Handle("POST /api/withdraw/settings", requireAuth(handleUpdateWithdrawSettings(db)))
+	mux.Handle("GET /api/withdraw/accounts", requireAuth(handleWithdrawAccounts(db)))
 	mux.Handle("/", spaHandler())
 
 	port := os.Getenv("PORT")

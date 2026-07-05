@@ -36,13 +36,33 @@ type TemplateSnapshot struct {
 	TotalPayout    float64   `json:"totalPayout"`
 }
 
+// autoWithdrawSettingsID is the fixed primary key of the singleton settings
+// row, seeded on startup so writes are plain updates.
+const autoWithdrawSettingsID uint = 1
+
+// AutoWithdrawSettings is the single-row config for the daily auto-withdraw
+// job, serialized as-is to the settings API. Enabled drives the cron, with
+// WithdrawalAccountID naming where the payout goes.
+type AutoWithdrawSettings struct {
+	ID                  uint      `gorm:"primaryKey" json:"-"`
+	Enabled             bool      `json:"enabled"`
+	WithdrawalAccountID string    `json:"withdrawalAccountId"`
+	UpdatedAt           time.Time `json:"-"`
+}
+
 func openDB(dsn string) *gorm.DB {
 	db, err := gorm.Open(duckdb.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("open database %s: %v", dsn, err)
 	}
-	if err := db.AutoMigrate(&RailwayCredentials{}, &TemplateSnapshot{}); err != nil {
+	if err := db.AutoMigrate(&RailwayCredentials{}, &TemplateSnapshot{}, &AutoWithdrawSettings{}); err != nil {
 		log.Fatalf("migrate database: %v", err)
+	}
+	// Seed the singleton settings row so later saves are plain updates (GORM's
+	// Save does not insert a missing primary key).
+	if err := db.Where(AutoWithdrawSettings{ID: autoWithdrawSettingsID}).
+		FirstOrCreate(&AutoWithdrawSettings{ID: autoWithdrawSettingsID}).Error; err != nil {
+		log.Fatalf("seed auto-withdraw settings: %v", err)
 	}
 	// AutoMigrate re-alters columns on every startup, and DuckDB cannot
 	// replay ALTER TABLE entries from the WAL (internal GetDefaultDatabase
@@ -51,6 +71,20 @@ func openDB(dsn string) *gorm.DB {
 		log.Fatalf("checkpoint database: %v", err)
 	}
 	return db
+}
+
+// loadAutoWithdrawSettings returns the singleton settings row (always present
+// after openDB seeds it).
+func loadAutoWithdrawSettings(ctx context.Context, db *gorm.DB) (AutoWithdrawSettings, error) {
+	return gorm.G[AutoWithdrawSettings](db).Where("id = ?", autoWithdrawSettingsID).First(ctx)
+}
+
+// saveAutoWithdrawSettings writes every field (including false booleans, which
+// Updates would skip) to the singleton row.
+func saveAutoWithdrawSettings(ctx context.Context, db *gorm.DB, s AutoWithdrawSettings) error {
+	s.ID = autoWithdrawSettingsID
+	s.UpdatedAt = time.Now().UTC()
+	return db.WithContext(ctx).Save(&s).Error
 }
 
 func saveToken(ctx context.Context, db *gorm.DB, id uint, tok tokenResponse) error {

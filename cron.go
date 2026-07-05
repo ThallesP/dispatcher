@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -11,10 +12,24 @@ import (
 
 const templateSnapshotSpec = "@hourly"
 
+// autoWithdrawSpec runs the payout job once a day at 08:00 UTC. ACH batches
+// clear on US business mornings, so submitting in the early US morning
+// (~03:00–04:00 ET) queues the request before that day's window rather than
+// missing the cutoff — while still leaving the workspace token time to refresh.
+const autoWithdrawSpec = "0 8 * * *"
+
 func startCrons(db *gorm.DB) *cron.Cron {
-	c := cron.New(cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)))
+	// Fixed to UTC so the daily withdrawal fires at a predictable wall-clock
+	// time regardless of the host's timezone.
+	c := cron.New(
+		cron.WithLocation(time.UTC),
+		cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)),
+	)
 	if _, err := c.AddFunc(templateSnapshotSpec, func() { collectTemplateSnapshots(db) }); err != nil {
 		log.Fatalf("schedule template snapshots: %v", err)
+	}
+	if _, err := c.AddFunc(autoWithdrawSpec, func() { runAutoWithdraw(db) }); err != nil {
+		log.Fatalf("schedule auto-withdraw: %v", err)
 	}
 	c.Start()
 	// Collect once at startup so the series has a point right away instead of
@@ -68,4 +83,73 @@ func collectTemplateSnapshots(db *gorm.DB) {
 		return
 	}
 	log.Printf("template snapshots: stored %d templates", len(snapshots))
+}
+
+// autoWithdrawMu keeps runs from overlapping: the cron chain only serializes
+// cron-triggered runs, not the immediate run kicked off when the user enables
+// auto-withdraw, and overlapping runs could both pass the pending check and
+// double-withdraw.
+var autoWithdrawMu sync.Mutex
+
+// runAutoWithdraw requests a cash payout of the available balance when the user
+// has opted in. It mirrors the guardrails of the reference script: skip unless
+// the balance clears the $100 minimum, skip while a withdrawal is still
+// pending (idempotency), and round down to a $5 multiple before requesting.
+// Safe to call directly for a one-off run; every invocation re-checks the
+// guardrails.
+func runAutoWithdraw(db *gorm.DB) {
+	if !autoWithdrawMu.TryLock() {
+		log.Printf("auto-withdraw: run already in progress, skipping")
+		return
+	}
+	defer autoWithdrawMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	s, err := loadAutoWithdrawSettings(ctx, db)
+	if err != nil {
+		log.Printf("auto-withdraw: load settings: %v", err)
+		return
+	}
+	if !s.Enabled || s.WithdrawalAccountID == "" {
+		return
+	}
+
+	token, customerID, err := workspaceCustomer(ctx, db)
+	if err != nil {
+		log.Printf("auto-withdraw: %v", err)
+		return
+	}
+
+	balance, err := getAvailableBalance(ctx, token, customerID)
+	if err != nil {
+		log.Printf("auto-withdraw: balance: %v", err)
+		return
+	}
+	if balance <= withdrawMinimumCents {
+		log.Printf("auto-withdraw: balance $%.2f not above $%.2f minimum, skipping",
+			float64(balance)/100, float64(withdrawMinimumCents)/100)
+		return
+	}
+
+	pending, err := getPendingWithdrawalCount(ctx, token, customerID)
+	if err != nil {
+		log.Printf("auto-withdraw: pending check: %v", err)
+		return
+	}
+	if pending > 0 {
+		log.Printf("auto-withdraw: %d pending withdrawal(s), skipping", pending)
+		return
+	}
+
+	// Railway rounds cash withdrawals to $5 increments — floor to a whole $5
+	// multiple. Anything above the $100 minimum still floors to at least $100.
+	amount := balance / 500 * 500
+
+	if err := createCashWithdrawal(ctx, token, customerID, s.WithdrawalAccountID, amount); err != nil {
+		log.Printf("auto-withdraw: create: %v", err)
+		return
+	}
+	log.Printf("auto-withdraw: requested $%.2f withdrawal", float64(amount)/100)
 }

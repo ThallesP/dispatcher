@@ -21,6 +21,11 @@ const (
 	railwayRegisterURL = "https://backboard.railway.com/oauth/register"
 	railwayTokenURL    = "https://backboard.railway.com/oauth/token"
 	railwayGraphQLURL  = "https://backboard.railway.com/graphql/v2"
+	// Withdrawal/earnings resolvers live on Railway's internal GraphQL
+	// endpoints, not the public /graphql/v2. The `customer` field on a
+	// workspace is only exposed on /graphql/v2/internal.
+	railwayGraphQLV2InternalURL = "https://backboard.railway.com/graphql/v2/internal"
+	railwayGraphQLInternalURL   = "https://backboard.railway.com/graphql/internal"
 )
 
 type clientRegistrationRequest struct {
@@ -126,14 +131,14 @@ func requestToken(ctx context.Context, creds RailwayCredentials, form url.Values
 	return tok, nil
 }
 
-// railwayQuery runs a GraphQL query against the Railway API and decodes the
-// response's data payload into out.
-func railwayQuery(ctx context.Context, accessToken, query string, variables map[string]any, out any) error {
+// graphqlRequest posts a GraphQL query to the given Railway endpoint and
+// decodes the data payload into out.
+func graphqlRequest(ctx context.Context, endpoint, accessToken, query string, variables map[string]any, out any) error {
 	payload, err := json.Marshal(map[string]any{"query": query, "variables": variables})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, railwayGraphQLURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -188,7 +193,7 @@ func getAuthUser(ctx context.Context, accessToken string) (authUser, error) {
 		Me authUser `json:"me"`
 	}
 	query := "query ($id: String!) { project(id: $id) { workspaceId } me { id avatar email name workspaces { id } } }"
-	if err := railwayQuery(ctx, accessToken, query, map[string]any{"id": projectID}, &data); err != nil {
+	if err := graphqlRequest(ctx, railwayGraphQLURL, accessToken, query, map[string]any{"id": projectID}, &data); err != nil {
 		return authUser{}, err
 	}
 	for _, ws := range data.Me.Workspaces {
@@ -208,7 +213,7 @@ func getProjectWorkspaceID(ctx context.Context, accessToken string) (string, err
 		} `json:"project"`
 	}
 	query := "query ($id: String!) { project(id: $id) { workspaceId } }"
-	err := railwayQuery(ctx, accessToken, query, map[string]any{"id": os.Getenv("RAILWAY_PROJECT_ID")}, &data)
+	err := graphqlRequest(ctx, railwayGraphQLURL, accessToken, query, map[string]any{"id": os.Getenv("RAILWAY_PROJECT_ID")}, &data)
 	if err != nil {
 		return "", err
 	}
@@ -256,7 +261,7 @@ func getWorkspaceTemplates(ctx context.Context, accessToken, workspaceID string)
 			} `json:"edges"`
 		} `json:"workspaceTemplates"`
 	}
-	err := railwayQuery(ctx, accessToken, workspaceTemplatesQuery, map[string]any{"workspaceId": workspaceID}, &data)
+	err := graphqlRequest(ctx, railwayGraphQLURL, accessToken, workspaceTemplatesQuery, map[string]any{"workspaceId": workspaceID}, &data)
 	if err != nil {
 		return nil, err
 	}
@@ -265,4 +270,123 @@ func getWorkspaceTemplates(ctx context.Context, accessToken, workspaceID string)
 		templates = append(templates, edge.Node)
 	}
 	return templates, nil
+}
+
+// withdrawMinimumCents is Railway's floor for a cash withdrawal ($100). The
+// backboard API rejects anything below it ("You cannot withdraw less than 100
+// dollars.").
+const withdrawMinimumCents int64 = 10000
+
+// getWorkspaceCustomerID resolves the billing customer id for a workspace,
+// needed to read balances and request cash withdrawals. The `customer` field
+// is only exposed on the internal endpoint.
+func getWorkspaceCustomerID(ctx context.Context, accessToken, workspaceID string) (string, error) {
+	var data struct {
+		Me struct {
+			Workspaces []struct {
+				ID       string `json:"id"`
+				Customer struct {
+					ID string `json:"id"`
+				} `json:"customer"`
+			} `json:"workspaces"`
+		} `json:"me"`
+	}
+	query := "query { me { workspaces { id customer { id } } } }"
+	if err := graphqlRequest(ctx, railwayGraphQLV2InternalURL, accessToken, query, nil, &data); err != nil {
+		return "", err
+	}
+	for _, ws := range data.Me.Workspaces {
+		if ws.ID == workspaceID {
+			if ws.Customer.ID == "" {
+				return "", fmt.Errorf("workspace %s has no billing customer", workspaceID)
+			}
+			return ws.Customer.ID, nil
+		}
+	}
+	return "", fmt.Errorf("workspace %s not found for user", workspaceID)
+}
+
+// withdrawalAccount is a payout destination (a Stripe Connect bank/card) the
+// customer can withdraw cash to.
+type withdrawalAccount struct {
+	ID            string `json:"id"`
+	Platform      string `json:"platform"`
+	StripeConnect struct {
+		HasOnboarded   bool   `json:"hasOnboarded"`
+		NeedsAttention bool   `json:"needsAttention"`
+		BankLast4      string `json:"bankLast4"`
+		CardLast4      string `json:"cardLast4"`
+	} `json:"stripeConnectInfo"`
+}
+
+const withdrawalAccountsQuery = `query ($customerId: String!) {
+  withdrawalAccountsV2(customerId: $customerId) {
+    id
+    platform
+    stripeConnectInfo {
+      hasOnboarded
+      needsAttention
+      bankLast4
+      cardLast4
+    }
+  }
+}`
+
+func getWithdrawalAccounts(ctx context.Context, accessToken, customerID string) ([]withdrawalAccount, error) {
+	var data struct {
+		Accounts []withdrawalAccount `json:"withdrawalAccountsV2"`
+	}
+	err := graphqlRequest(ctx, railwayGraphQLInternalURL, accessToken, withdrawalAccountsQuery,
+		map[string]any{"customerId": customerID}, &data)
+	if err != nil {
+		return nil, err
+	}
+	return data.Accounts, nil
+}
+
+// getAvailableBalance returns the customer's withdrawable balance in cents.
+func getAvailableBalance(ctx context.Context, accessToken, customerID string) (int64, error) {
+	var data struct {
+		Balance int64 `json:"withdrawalAvailableBalance"`
+	}
+	query := "query ($customerId: String!) { withdrawalAvailableBalance(customerId: $customerId) }"
+	err := graphqlRequest(ctx, railwayGraphQLInternalURL, accessToken, query,
+		map[string]any{"customerId": customerID}, &data)
+	return data.Balance, err
+}
+
+// getPendingWithdrawalCount reports how many withdrawals are still PENDING, so
+// the auto-withdraw job never stacks a second request on an unsettled one.
+func getPendingWithdrawalCount(ctx context.Context, accessToken, customerID string) (int, error) {
+	var data struct {
+		Withdrawals []struct {
+			ID string `json:"id"`
+		} `json:"withdrawals"`
+	}
+	query := "query ($customerId: String!, $status: WithdrawalStatusType) { withdrawals(customerId: $customerId, status: $status) { id } }"
+	err := graphqlRequest(ctx, railwayGraphQLInternalURL, accessToken, query,
+		map[string]any{"customerId": customerID, "status": "PENDING"}, &data)
+	return len(data.Withdrawals), err
+}
+
+// createCashWithdrawal requests a cash payout of amountCents to the given
+// account. The mutation returns a bare success boolean. This moves real money.
+func createCashWithdrawal(ctx context.Context, accessToken, customerID, accountID string, amountCents int64) error {
+	var data struct {
+		OK bool `json:"withdrawalToCashCreate"`
+	}
+	query := "mutation ($input: WithdrawalRequestInput!) { withdrawalToCashCreate(input: $input) }"
+	input := map[string]any{
+		"customerId":          customerID,
+		"amount":              amountCents,
+		"withdrawalAccountId": accountID,
+	}
+	if err := graphqlRequest(ctx, railwayGraphQLInternalURL, accessToken, query,
+		map[string]any{"input": input}, &data); err != nil {
+		return err
+	}
+	if !data.OK {
+		return fmt.Errorf("withdrawalToCashCreate returned false")
+	}
+	return nil
 }
