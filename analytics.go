@@ -191,6 +191,9 @@ type templateAnalytics struct {
 	Code            string   `json:"code"`
 	Status          string   `json:"status"`
 	Health          *float64 `json:"health"`
+	SupportSolved   *float64 `json:"supportSolved"`
+	SupportCsat     *float64 `json:"supportCsat"`
+	SupportHealth   *float64 `json:"supportHealth"`
 	Projects        int64    `json:"projects"`
 	RecentProjects  int64    `json:"recentProjects"`
 	ActiveProjects  int64    `json:"activeProjects"`
@@ -228,6 +231,7 @@ func handleTemplateAnalytics(db *gorm.DB) http.HandlerFunc {
 		templates := []templateAnalytics{}
 		err = db.WithContext(r.Context()).Raw(`
 			SELECT cur.template_id, cur.name, cur.code, cur.status, cur.health,
+			       cur.support_solved, cur.support_csat, cur.support_health,
 			       cur.projects, cur.recent_projects, cur.active_projects, cur.total_payout,
 			       prev.total_payout AS payout_previous
 			FROM template_snapshots cur

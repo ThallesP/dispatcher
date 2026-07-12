@@ -223,16 +223,30 @@ func getProjectWorkspaceID(ctx context.Context, accessToken string) (string, err
 	return data.Project.WorkspaceID, nil
 }
 
+// supportHealthMetrics grades a template's community support threads: solved
+// and csat are 0-100 percentages, aggregateHealth averages them (or is just
+// solved when csat is missing). Railway returns null when the template has no
+// threads to grade — that means all okay, not unhealthy. aggregateHealth >= 80
+// qualifies the template for the support bonus (an extra 10% kickback).
+// SupportHealthMetrics is a custom JSON scalar in Railway's schema, so the
+// query selects it bare (no subfields) and this struct decodes the blob.
+type supportHealthMetrics struct {
+	Solved          *float64 `json:"solved"`
+	Csat            *float64 `json:"csat"`
+	AggregateHealth *float64 `json:"aggregateHealth"`
+}
+
 type workspaceTemplate struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Code           string   `json:"code"`
-	Status         string   `json:"status"`
-	Health         *float64 `json:"health"`
-	Projects       int64    `json:"projects"`
-	RecentProjects int64    `json:"recentProjects"`
-	ActiveProjects int64    `json:"activeProjects"`
-	TotalPayout    float64  `json:"totalPayout"`
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	Code           string                `json:"code"`
+	Status         string                `json:"status"`
+	Health         *float64              `json:"health"`
+	SupportHealth  *supportHealthMetrics `json:"supportHealthMetrics"`
+	Projects       int64                 `json:"projects"`
+	RecentProjects int64                 `json:"recentProjects"`
+	ActiveProjects int64                 `json:"activeProjects"`
+	TotalPayout    float64               `json:"totalPayout"`
 }
 
 const workspaceTemplatesQuery = `query ($workspaceId: String!) {
@@ -244,6 +258,7 @@ const workspaceTemplatesQuery = `query ($workspaceId: String!) {
         code
         status
         health
+        supportHealthMetrics
         projects
         recentProjects
         activeProjects

@@ -23,17 +23,23 @@ type RailwayCredentials struct {
 // TemplateSnapshot is one point-in-time observation of a workspace template,
 // appended on every poll so payout/usage can be charted over time.
 type TemplateSnapshot struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	SampledAt      time.Time `json:"sampledAt"`
-	TemplateID     string    `json:"templateId"`
-	Name           string    `json:"name"`
-	Code           string    `json:"code"`
-	Status         string    `json:"status"`
-	Health         *float64  `json:"health"`
-	Projects       int64     `json:"projects"`
-	RecentProjects int64     `json:"recentProjects"`
-	ActiveProjects int64     `json:"activeProjects"`
-	TotalPayout    float64   `json:"totalPayout"`
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	SampledAt  time.Time `json:"sampledAt"`
+	TemplateID string    `json:"templateId"`
+	Name       string    `json:"name"`
+	Code       string    `json:"code"`
+	Status     string    `json:"status"`
+	Health     *float64  `json:"health"`
+	// Support-thread metrics (see supportHealthMetrics in railway.go);
+	// SupportHealth holds aggregateHealth. All nil when Railway reports no
+	// threads to grade — which counts as healthy.
+	SupportSolved  *float64 `json:"supportSolved"`
+	SupportCsat    *float64 `json:"supportCsat"`
+	SupportHealth  *float64 `json:"supportHealth"`
+	Projects       int64    `json:"projects"`
+	RecentProjects int64    `json:"recentProjects"`
+	ActiveProjects int64    `json:"activeProjects"`
+	TotalPayout    float64  `json:"totalPayout"`
 }
 
 // autoWithdrawSettingsID is the fixed primary key of the singleton settings

@@ -41,6 +41,12 @@ export interface TemplateAnalytics {
   code: string;
   status: string;
   health: number | null;
+  /** Support-thread percentages (0-100); all null when there are no threads
+   * to grade, which counts as healthy. supportHealth >= 80 earns the support
+   * bonus (+10% kickback). */
+  supportSolved: number | null;
+  supportCsat: number | null;
+  supportHealth: number | null;
   projects: number;
   recentProjects: number;
   activeProjects: number;

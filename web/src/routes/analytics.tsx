@@ -141,8 +141,9 @@ export default function Analytics() {
                   <th className="pb-2 font-medium">Template</th>
                   <th className="pb-2 pl-3 text-right font-medium">Projects</th>
                   <th className="pb-2 pl-3 text-right font-medium">Active</th>
+                  <th className="pb-2 pl-3 text-right font-medium">Health</th>
                   <th className="pb-2 pl-3 text-right font-medium">Payout</th>
-                  <th className="pb-2 pl-3 text-right font-medium">Δ payout</th>
+                  <th className="pb-2 pl-3 text-right font-medium">Payout change</th>
                 </tr>
               </thead>
               <tbody>
@@ -296,6 +297,9 @@ function TemplateRow({ template: t }: { template: TemplateAnalytics }) {
       <td className="py-2.5 pl-3 text-right tabular-nums">
         {fmtNum(t.activeProjects)}
       </td>
+      <td className="py-2.5 pl-3 text-right tabular-nums">
+        <SupportHealth template={t} />
+      </td>
       <td className="whitespace-nowrap py-2.5 pl-3 text-right font-medium tabular-nums">
         {fmtUsd(t.totalPayout)}
       </td>
@@ -311,5 +315,28 @@ function TemplateRow({ template: t }: { template: TemplateAnalytics }) {
         {t.payoutChangePct != null ? fmtSignedPct(t.payoutChangePct) : "—"}
       </td>
     </tr>
+  );
+}
+
+// Support-thread health from Railway. Null means the template has no threads
+// to grade — healthy, so it renders as 100%. 80%+ qualifies for the support
+// bonus (an extra 10% kickback), so that's the green/red line.
+function SupportHealth({ template: t }: { template: TemplateAnalytics }) {
+  const health = t.supportHealth ?? 100;
+  const parts = [];
+  if (t.supportSolved != null) parts.push(`${t.supportSolved.toFixed(0)}% solved`);
+  if (t.supportCsat != null) parts.push(`${t.supportCsat.toFixed(0)}% CSAT`);
+  if (parts.length === 0) parts.push("no support threads to grade");
+  const bonus =
+    health >= 80
+      ? "qualifies for the +10% support bonus"
+      : "below the 80% support-bonus threshold";
+  return (
+    <span
+      className={health >= 80 ? "text-(--viz-up)" : "text-(--viz-critical)"}
+      title={`${parts.join(" · ")} — ${bonus}`}
+    >
+      {health.toFixed(0)}%
+    </span>
   );
 }

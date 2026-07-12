@@ -110,7 +110,7 @@ func collectTemplateSnapshots(db *gorm.DB) error {
 	sampledAt := time.Now().UTC()
 	snapshots := make([]TemplateSnapshot, 0, len(templates))
 	for _, t := range templates {
-		snapshots = append(snapshots, TemplateSnapshot{
+		snapshot := TemplateSnapshot{
 			SampledAt:      sampledAt,
 			TemplateID:     t.ID,
 			Name:           t.Name,
@@ -121,7 +121,13 @@ func collectTemplateSnapshots(db *gorm.DB) error {
 			RecentProjects: t.RecentProjects,
 			ActiveProjects: t.ActiveProjects,
 			TotalPayout:    t.TotalPayout,
-		})
+		}
+		if sh := t.SupportHealth; sh != nil {
+			snapshot.SupportSolved = sh.Solved
+			snapshot.SupportCsat = sh.Csat
+			snapshot.SupportHealth = sh.AggregateHealth
+		}
+		snapshots = append(snapshots, snapshot)
 	}
 	if err := gorm.G[TemplateSnapshot](db).CreateInBatches(ctx, &snapshots, 100); err != nil {
 		return err

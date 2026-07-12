@@ -32,11 +32,25 @@ function seriesColor(key: string, index: number): string {
 }
 
 /** Signed growth from the window's first sample to the hovered one, e.g.
- * "+12.4%"; "—" when there is no baseline to compare against. */
-function growthSince(base: unknown, current: unknown): string {
+ * "+12.4%" in green/red by direction; "—" when there is no baseline to
+ * compare against. */
+function GrowthSince({ base, current }: { base: unknown; current: unknown }) {
   const b = Number(base);
   const c = Number(current);
-  return b > 0 && Number.isFinite(c) ? fmtSignedPct(((c - b) / b) * 100) : "—";
+  const pct = b > 0 && Number.isFinite(c) ? ((c - b) / b) * 100 : null;
+  return (
+    <span
+      className={`min-w-12 text-right font-mono tabular-nums ${
+        pct == null
+          ? "text-muted-foreground"
+          : pct >= 0
+            ? "text-(--viz-up)"
+            : "text-(--viz-down)"
+      }`}
+    >
+      {pct == null ? "—" : fmtSignedPct(pct)}
+    </span>
+  );
 }
 
 export function PayoutChart({ data }: { data: PayoutSeriesResponse }) {
@@ -116,9 +130,10 @@ export function PayoutChart({ data }: { data: PayoutSeriesResponse }) {
                       <span className="font-mono font-medium text-foreground tabular-nums">
                         {fmtUsd(Number(value))}
                       </span>
-                      <span className="min-w-12 text-right font-mono text-muted-foreground tabular-nums">
-                        {growthSince(baseline?.[name as string], value)}
-                      </span>
+                      <GrowthSince
+                        base={baseline?.[name as string]}
+                        current={value}
+                      />
                     </span>
                   </div>
                   {index === series.length - 1 && (
@@ -130,17 +145,15 @@ export function PayoutChart({ data }: { data: PayoutSeriesResponse }) {
                             <span className="font-mono font-medium text-foreground tabular-nums">
                               {fmtUsd(stackTotal(item.payload))}
                             </span>
-                            <span className="min-w-12 text-right font-mono text-muted-foreground tabular-nums">
-                              {growthSince(
-                                stackTotal(baseline),
-                                stackTotal(item.payload),
-                              )}
-                            </span>
+                            <GrowthSince
+                              base={stackTotal(baseline)}
+                              current={stackTotal(item.payload)}
+                            />
                           </span>
                         </div>
                       )}
                       <div className="basis-full text-right text-[10px] leading-none text-muted-foreground">
-                        Δ since {baselineLabel}
+                        Change since {baselineLabel}
                       </div>
                     </>
                   )}
