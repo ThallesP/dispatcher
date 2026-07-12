@@ -4,13 +4,6 @@ const usd = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-const usdCompact = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
 const num = new Intl.NumberFormat("en-US");
 
 const usdWhole = new Intl.NumberFormat("en-US", {
@@ -19,13 +12,15 @@ const usdWhole = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
+/** Full comma-separated dollars, never abbreviated; cents dropped once they
+ * stop mattering ($10,000+). */
 export function fmtUsd(v: number): string {
-  return Math.abs(v) >= 10_000 ? usdCompact.format(v) : usd.format(v);
+  return Math.abs(v) >= 10_000 ? usdWhole.format(v) : usd.format(v);
 }
 
-/** Clean axis-tick currency: whole dollars, compact past 10K. */
+/** Axis-tick currency: whole comma-separated dollars. */
 export function fmtUsdTick(v: number): string {
-  return Math.abs(v) >= 10_000 ? usdCompact.format(v) : usdWhole.format(v);
+  return usdWhole.format(v);
 }
 
 export function fmtNum(v: number): string {

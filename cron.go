@@ -12,14 +12,41 @@ import (
 
 const templateSnapshotSpec = "@hourly"
 
-// autoWithdrawSpec runs the payout job once a day at 08:00 UTC. ACH batches
-// clear on US business mornings, so submitting in the early US morning
+// defaultAutoWithdrawSpec runs the payout job once a day at 08:00 UTC. ACH
+// batches clear on US business mornings, so submitting in the early US morning
 // (~03:00–04:00 ET) queues the request before that day's window rather than
 // missing the cutoff — while still leaving the workspace token time to refresh.
-const autoWithdrawSpec = "0 8 * * *"
+// Users can override it per-workspace via the settings API.
+const defaultAutoWithdrawSpec = "0 8 * * *"
+
+// autoWithdrawEntry tracks the live cron registration of the payout job so a
+// settings change can swap the schedule without restarting the process.
+var autoWithdrawEntry struct {
+	sync.Mutex
+	c  *cron.Cron
+	id cron.EntryID
+}
+
+// scheduleAutoWithdraw (re)registers the auto-withdraw job under the given
+// cron spec, replacing the previous registration. The spec is parsed with the
+// same standard parser the API validates against, so an error here means the
+// stored value predates validation.
+func scheduleAutoWithdraw(db *gorm.DB, spec string) error {
+	schedule, err := cron.ParseStandard(spec)
+	if err != nil {
+		return err
+	}
+	autoWithdrawEntry.Lock()
+	defer autoWithdrawEntry.Unlock()
+	if autoWithdrawEntry.id != 0 {
+		autoWithdrawEntry.c.Remove(autoWithdrawEntry.id)
+	}
+	autoWithdrawEntry.id = autoWithdrawEntry.c.Schedule(schedule, cron.FuncJob(func() { runAutoWithdraw(db) }))
+	return nil
+}
 
 func startCrons(db *gorm.DB) *cron.Cron {
-	// Fixed to UTC so the daily withdrawal fires at a predictable wall-clock
+	// Fixed to UTC so withdrawal schedules fire at a predictable wall-clock
 	// time regardless of the host's timezone.
 	c := cron.New(
 		cron.WithLocation(time.UTC),
@@ -28,9 +55,21 @@ func startCrons(db *gorm.DB) *cron.Cron {
 	if _, err := c.AddFunc(templateSnapshotSpec, func() { runTemplateSnapshots(db) }); err != nil {
 		log.Fatalf("schedule template snapshots: %v", err)
 	}
-	if _, err := c.AddFunc(autoWithdrawSpec, func() { runAutoWithdraw(db) }); err != nil {
-		log.Fatalf("schedule auto-withdraw: %v", err)
+	autoWithdrawEntry.c = c
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	s, err := loadAutoWithdrawSettings(ctx, db)
+	cancel()
+	if err != nil {
+		log.Fatalf("load auto-withdraw settings: %v", err)
 	}
+	if err := scheduleAutoWithdraw(db, s.Schedule); err != nil {
+		log.Printf("auto-withdraw: stored schedule %q invalid (%v), using default", s.Schedule, err)
+		if err := scheduleAutoWithdraw(db, defaultAutoWithdrawSpec); err != nil {
+			log.Fatalf("schedule auto-withdraw: %v", err)
+		}
+	}
+
 	c.Start()
 	// Collect once at startup so the series has a point right away instead of
 	// waiting for the first tick.

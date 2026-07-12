@@ -40,13 +40,15 @@ type TemplateSnapshot struct {
 // row, seeded on startup so writes are plain updates.
 const autoWithdrawSettingsID uint = 1
 
-// AutoWithdrawSettings is the single-row config for the daily auto-withdraw
-// job, serialized as-is to the settings API. Enabled drives the cron, with
-// WithdrawalAccountID naming where the payout goes.
+// AutoWithdrawSettings is the single-row config for the auto-withdraw job,
+// serialized as-is to the settings API. Enabled drives the cron, with
+// WithdrawalAccountID naming where the payout goes and Schedule (a standard
+// cron spec, UTC) saying when it runs.
 type AutoWithdrawSettings struct {
 	ID                  uint      `gorm:"primaryKey" json:"-"`
 	Enabled             bool      `json:"enabled"`
 	WithdrawalAccountID string    `json:"withdrawalAccountId"`
+	Schedule            string    `json:"schedule"`
 	UpdatedAt           time.Time `json:"-"`
 }
 
@@ -74,9 +76,14 @@ func openDB(dsn string) *gorm.DB {
 }
 
 // loadAutoWithdrawSettings returns the singleton settings row (always present
-// after openDB seeds it).
+// after openDB seeds it). Rows written before the schedule existed have an
+// empty spec, so normalize to the default here rather than migrating.
 func loadAutoWithdrawSettings(ctx context.Context, db *gorm.DB) (AutoWithdrawSettings, error) {
-	return gorm.G[AutoWithdrawSettings](db).Where("id = ?", autoWithdrawSettingsID).First(ctx)
+	s, err := gorm.G[AutoWithdrawSettings](db).Where("id = ?", autoWithdrawSettingsID).First(ctx)
+	if err == nil && s.Schedule == "" {
+		s.Schedule = defaultAutoWithdrawSpec
+	}
+	return s, err
 }
 
 // saveAutoWithdrawSettings writes every field (including false booleans, which

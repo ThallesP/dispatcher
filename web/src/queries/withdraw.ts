@@ -4,6 +4,33 @@ import { api } from "~/lib/api";
 export interface WithdrawSettings {
   enabled: boolean;
   withdrawalAccountId: string;
+  /** Standard cron spec, evaluated in UTC. */
+  schedule: string;
+}
+
+/**
+ * Friendly cadences offered in the setup dialog; anything else is entered as
+ * a raw cron spec. All presets fire at 08:00 UTC to catch the US-morning ACH
+ * window (mirrors the backend default).
+ */
+export const SCHEDULE_PRESETS = [
+  { spec: "0 8 * * *", label: "Daily", description: "every day at 08:00 UTC" },
+  {
+    spec: "0 8 * * 1",
+    label: "Weekly",
+    description: "Mondays at 08:00 UTC",
+  },
+  {
+    spec: "0 8 1 * *",
+    label: "Monthly",
+    description: "on the 1st at 08:00 UTC",
+  },
+] as const;
+
+/** Human phrasing of a schedule, falling back to the raw spec for custom crons. */
+export function scheduleDescription(spec: string): string {
+  const preset = SCHEDULE_PRESETS.find((p) => p.spec === spec);
+  return preset ? preset.description : `on cron schedule “${spec}” (UTC)`;
 }
 
 export interface WithdrawalAccount {
@@ -44,11 +71,24 @@ export const withdrawAccountsQuery = queryOptions({
   }),
 });
 
-export function saveWithdrawSettings(body: {
+export async function saveWithdrawSettings(body: {
   enabled: boolean;
   withdrawalAccountId?: string;
+  schedule?: string;
 }): Promise<WithdrawSettings> {
-  return api.post("withdraw/settings", { json: body }).json<WithdrawSettings>();
+  // Surface the server's message (e.g. why a cron spec was rejected) instead
+  // of ky's generic HTTPError text.
+  const res = await api.post("withdraw/settings", {
+    json: body,
+    throwHttpErrors: false,
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(detail?.error ?? "Couldn’t save — please try again.");
+  }
+  return res.json<WithdrawSettings>();
 }
 
 /** Human label for a Stripe Connect payout destination. */

@@ -4,19 +4,45 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
 	"gorm.io/gorm"
 )
 
-type payoutPoint struct {
-	SampledAt   time.Time `json:"sampledAt"`
-	TotalPayout float64   `json:"totalPayout"`
+// maxPayoutSeries caps how many templates get their own line in the payout
+// chart; the rest are folded into a single "Other" series. Matches the five
+// categorical chart colors on the frontend.
+const maxPayoutSeries = 5
+
+const otherSeriesKey = "other"
+
+type payoutSeriesEntry struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
 }
 
-// handlePayoutSeries returns the workspace-wide total payout per sample so it
-// can be charted over time. ?days=N bounds the window (default 30).
+type payoutSeriesPoint struct {
+	SampledAt time.Time          `json:"sampledAt"`
+	Values    map[string]float64 `json:"values"`
+}
+
+type payoutSeriesResponse struct {
+	Series []payoutSeriesEntry `json:"series"`
+	Points []payoutSeriesPoint `json:"points"`
+}
+
+type payoutSampleRow struct {
+	SampledAt   time.Time
+	TemplateID  string
+	Name        string
+	TotalPayout float64
+}
+
+// handlePayoutSeries returns per-template payout over time for a stacked
+// chart: the top templates by payout as their own series plus an "Other"
+// fold. ?days=N bounds the window (default 30).
 func handlePayoutSeries(db *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		days := 30
@@ -25,19 +51,76 @@ func handlePayoutSeries(db *gorm.DB) http.HandlerFunc {
 		}
 		since := time.Now().UTC().AddDate(0, 0, -days)
 
-		points := []payoutPoint{}
+		rows := []payoutSampleRow{}
 		err := db.WithContext(r.Context()).Raw(`
-			SELECT sampled_at, SUM(total_payout) AS total_payout
+			SELECT sampled_at, template_id, name, total_payout
 			FROM template_snapshots
 			WHERE sampled_at >= ?
-			GROUP BY sampled_at
-			ORDER BY sampled_at`, since).Scan(&points).Error
+			ORDER BY sampled_at`, since).Scan(&rows).Error
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, points)
+		writeJSON(w, http.StatusOK, buildPayoutSeries(rows))
 	}
+}
+
+// buildPayoutSeries pivots snapshot rows into chart series. Templates are
+// ranked by their peak payout in the window (payouts are cumulative, so peak
+// ≈ latest, but this also keeps templates that vanish mid-window ranked);
+// ranking on the whole window keeps colors stable across 7d/30d/90d switches.
+func buildPayoutSeries(rows []payoutSampleRow) payoutSeriesResponse {
+	resp := payoutSeriesResponse{Series: []payoutSeriesEntry{}, Points: []payoutSeriesPoint{}}
+	if len(rows) == 0 {
+		return resp
+	}
+
+	peak := map[string]float64{}
+	names := map[string]string{}
+	ranked := []string{}
+	for _, row := range rows {
+		if _, seen := peak[row.TemplateID]; !seen {
+			ranked = append(ranked, row.TemplateID)
+			names[row.TemplateID] = row.Name
+		}
+		peak[row.TemplateID] = max(peak[row.TemplateID], row.TotalPayout)
+	}
+	sort.SliceStable(ranked, func(i, j int) bool { return peak[ranked[i]] > peak[ranked[j]] })
+
+	// Biggest series first = bottom of the stack; everything past the cap
+	// sums into "Other" so the chart never runs out of colors.
+	topKeys := map[string]bool{}
+	for i, id := range ranked {
+		if i >= maxPayoutSeries {
+			break
+		}
+		topKeys[id] = true
+		resp.Series = append(resp.Series, payoutSeriesEntry{Key: id, Name: names[id]})
+	}
+	hasOther := len(ranked) > maxPayoutSeries
+	if hasOther {
+		resp.Series = append(resp.Series, payoutSeriesEntry{Key: otherSeriesKey, Name: "Other"})
+	}
+
+	for _, row := range rows {
+		n := len(resp.Points)
+		if n == 0 || !resp.Points[n-1].SampledAt.Equal(row.SampledAt) {
+			// Zero-fill every series so stacking never sees a missing key.
+			values := make(map[string]float64, len(resp.Series))
+			for _, s := range resp.Series {
+				values[s.Key] = 0
+			}
+			resp.Points = append(resp.Points, payoutSeriesPoint{SampledAt: row.SampledAt, Values: values})
+			n++
+		}
+		point := resp.Points[n-1]
+		if topKeys[row.TemplateID] {
+			point.Values[row.TemplateID] += row.TotalPayout
+		} else {
+			point.Values[otherSeriesKey] += row.TotalPayout
+		}
+	}
+	return resp
 }
 
 type metricChange struct {

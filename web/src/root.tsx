@@ -27,16 +27,38 @@ export const links: Route.LinksFunction = () => [
   },
 ];
 
+// Railway is dark-first; follow the OS preference. Runs inline before paint so
+// there's no light flash, and keeps `.dark` in sync if the OS theme changes.
+const themeScript = `(function () {
+  var mq = window.matchMedia("(prefers-color-scheme: dark)");
+  var apply = function () {
+    document.documentElement.classList.toggle("dark", mq.matches);
+  };
+  apply();
+  mq.addEventListener("change", apply);
+})();`;
+
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: light)"
+          content="#ffffff"
+        />
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: dark)"
+          content="#13111c"
+        />
         <Meta />
         <Links />
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body>
+      <body className="rail-dots">
         {children}
         <ScrollRestoration />
         <Scripts />
@@ -58,7 +80,7 @@ export default function App() {
 export function HydrateFallback() {
   return (
     <>
-      <header className="border-b">
+      <header className="border-b bg-background">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <Skeleton className="h-5 w-24" />
           <div className="flex items-center gap-3">

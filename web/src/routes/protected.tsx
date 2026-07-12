@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { ChevronDown, LogOut, RefreshCw, TrainFront } from "lucide-react";
 import { Link, Outlet, useRevalidator } from "react-router";
 import { AutoWithdraw } from "~/components/auto-withdraw-dialog";
 import { Button } from "~/components/ui/button";
@@ -9,6 +9,15 @@ import {
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
 import { api } from "~/lib/api";
 import { useRefreshAnalytics } from "~/queries/analytics";
 import { getMe, type User } from "~/queries/me";
@@ -24,16 +33,16 @@ export default function Protected({ loaderData }: Route.ComponentProps) {
       <main className="flex min-h-screen items-center justify-center p-6">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>Dispatcher</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <TrainFront className="size-4 text-primary" />
+              Dispatcher
+            </CardTitle>
             <CardDescription>
               Template analytics for your Railway workspace
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button
-              className="w-full bg-[#853bce] text-white hover:bg-[#6e31aa] dark:bg-[#a667e4] dark:text-[#13111c] dark:hover:bg-[#853bce] dark:hover:text-white"
-              render={<a href="/api/auth/redirect" />}
-            >
+            <Button className="w-full" render={<a href="/api/auth/redirect" />}>
               Sign in with Railway
             </Button>
           </CardContent>
@@ -76,29 +85,39 @@ function Header({ user }: { user: User }) {
   };
 
   return (
-    <header className="border-b">
+    <header className="border-b bg-background">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-        <Link to="/" className="font-heading font-semibold">
+        <Link to="/" className="flex items-center gap-2 font-heading font-semibold">
+          <TrainFront className="size-4 text-primary" />
           Dispatcher
         </Link>
         <div className="flex items-center gap-3">
           <RefreshButton />
           <AutoWithdraw />
-          <div className="flex items-center gap-2">
-            {user.avatar && (
-              <img
-                src={user.avatar}
-                alt=""
-                className="size-6 rounded-full"
-              />
-            )}
-            <span className="text-sm text-muted-foreground" title={user.email}>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="sm" />}>
+              {user.avatar && (
+                <img src={user.avatar} alt="" className="size-5 rounded-full" />
+              )}
               {user.name}
-            </span>
-          </div>
-          <Button variant="ghost" size="sm" onClick={signOut}>
-            Sign out
-          </Button>
+              <ChevronDown className="text-muted-foreground" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>
+                  <span className="block text-sm font-medium text-foreground">
+                    {user.name}
+                  </span>
+                  <span className="block font-normal">{user.email}</span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={signOut}>
+                  <LogOut />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </header>

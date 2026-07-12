@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"slices"
 
+	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
 
@@ -57,6 +59,7 @@ func handleWithdrawAccounts(db *gorm.DB) http.HandlerFunc {
 type withdrawSettingsRequest struct {
 	Enabled             bool   `json:"enabled"`
 	WithdrawalAccountID string `json:"withdrawalAccountId"`
+	Schedule            string `json:"schedule"`
 }
 
 // handleUpdateWithdrawSettings turns auto-withdraw on or off. When enabling,
@@ -76,6 +79,16 @@ func handleUpdateWithdrawSettings(db *gorm.DB) http.HandlerFunc {
 			return
 		}
 		s.Enabled = req.Enabled
+
+		// An omitted schedule keeps the current one, so turning the job off
+		// doesn't reset a custom cadence.
+		if req.Schedule != "" {
+			if _, err := cron.ParseStandard(req.Schedule); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid schedule: " + err.Error()})
+				return
+			}
+			s.Schedule = req.Schedule
+		}
 
 		if req.Enabled {
 			if req.WithdrawalAccountID == "" {
@@ -103,7 +116,12 @@ func handleUpdateWithdrawSettings(db *gorm.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		// Attempt a withdrawal right away instead of waiting for the next daily
+		// Swap the live cron entry so the new cadence applies without a
+		// restart. The spec was validated above, so this cannot fail.
+		if err := scheduleAutoWithdraw(db, s.Schedule); err != nil {
+			log.Printf("auto-withdraw: reschedule: %v", err)
+		}
+		// Attempt a withdrawal right away instead of waiting for the next
 		// tick; runAutoWithdraw re-checks all guardrails so this is safe even
 		// when the balance is below the minimum or one is already pending.
 		if req.Enabled {

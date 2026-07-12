@@ -17,6 +17,8 @@ import {
   accountLabel,
   accountReady,
   saveWithdrawSettings,
+  SCHEDULE_PRESETS,
+  scheduleDescription,
   type WithdrawAccounts,
   withdrawAccountsQuery,
   withdrawSettingsQuery,
@@ -24,7 +26,7 @@ import {
 
 /**
  * AutoWithdraw is a header button that opens the auto-withdraw setup dialog:
- * pick a payout account and turn the daily withdrawal on or off.
+ * pick a payout account, choose how often it runs, and turn it on or off.
  */
 export function AutoWithdraw() {
   const qc = useQueryClient();
@@ -40,7 +42,7 @@ export function AutoWithdraw() {
   });
 
   if (!settings.data) return null;
-  const { enabled, withdrawalAccountId } = settings.data;
+  const { enabled, withdrawalAccountId, schedule } = settings.data;
 
   return (
     <>
@@ -52,8 +54,9 @@ export function AutoWithdraw() {
           <SetupView
             enabled={enabled}
             currentAccountId={withdrawalAccountId}
+            currentSchedule={schedule}
             pending={save.isPending}
-            failed={save.isError}
+            error={save.error}
             onSave={save.mutate}
             onCancel={() => setOpen(false)}
           />
@@ -66,16 +69,22 @@ export function AutoWithdraw() {
 function SetupView({
   enabled,
   currentAccountId,
+  currentSchedule,
   pending,
-  failed,
+  error,
   onSave,
   onCancel,
 }: {
   enabled: boolean;
   currentAccountId: string;
+  currentSchedule: string;
   pending: boolean;
-  failed: boolean;
-  onSave: (body: { enabled: boolean; withdrawalAccountId?: string }) => void;
+  error: Error | null;
+  onSave: (body: {
+    enabled: boolean;
+    withdrawalAccountId?: string;
+    schedule?: string;
+  }) => void;
   onCancel: () => void;
 }) {
   const accounts = useQuery(withdrawAccountsQuery);
@@ -83,24 +92,86 @@ function SetupView({
   // Default to the first usable account (banks sort first) until the user picks.
   const selected = picked || accounts.data?.accounts.find(accountReady)?.id || "";
 
+  // A stored schedule that isn't one of the presets was hand-written, so open
+  // straight into the cron editor with it.
+  const [custom, setCustom] = useState(
+    !SCHEDULE_PRESETS.some((p) => p.spec === currentSchedule),
+  );
+  const [spec, setSpec] = useState(currentSchedule);
+
   return (
     <>
       <DialogHeader>
         <DialogTitle>Auto-withdraw</DialogTitle>
         <DialogDescription>
           {accounts.data
-            ? `Available now: ${fmtCents(accounts.data.availableBalance)} · runs daily at 08:00 UTC once your balance is over ${fmtCents(accounts.data.minimumBalance)}.`
-            : "Automatically withdraw your Railway earnings to the account you choose, once a day."}
+            ? `Available now: ${fmtCents(accounts.data.availableBalance)} · runs ${custom ? "on the cron schedule below" : scheduleDescription(spec)} once your balance is over ${fmtCents(accounts.data.minimumBalance)}.`
+            : "Automatically withdraw your Railway earnings to the account you choose."}
         </DialogDescription>
       </DialogHeader>
 
       <AccountList query={accounts} selected={selected} onSelect={setPicked} />
 
-      {failed && (
-        <p className="text-sm text-destructive">
-          Couldn&apos;t save — please try again.
-        </p>
-      )}
+      <div className="grid gap-2">
+        <span className="text-sm font-medium">Frequency</span>
+        <div role="radiogroup" className="grid grid-cols-4 gap-1 rounded-lg border p-1">
+          {SCHEDULE_PRESETS.map((p) => {
+            const active = !custom && spec === p.spec;
+            return (
+              <button
+                type="button"
+                role="radio"
+                aria-checked={active}
+                key={p.spec}
+                onClick={() => {
+                  setCustom(false);
+                  setSpec(p.spec);
+                }}
+                className={cn(
+                  "cursor-pointer rounded-md px-2 py-1.5 text-sm",
+                  active
+                    ? "bg-muted font-medium"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={custom}
+            onClick={() => setCustom(true)}
+            className={cn(
+              "cursor-pointer rounded-md px-2 py-1.5 text-sm",
+              custom
+                ? "bg-muted font-medium"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Custom
+          </button>
+        </div>
+        {custom && (
+          <>
+            <input
+              value={spec}
+              onChange={(e) => setSpec(e.target.value)}
+              placeholder="0 8 * * *"
+              spellCheck={false}
+              aria-label="Cron schedule"
+              className="h-9 rounded-md border border-input bg-transparent px-3 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <p className="text-xs text-muted-foreground">
+              Cron format in UTC: minute, hour, day of month, month, day of
+              week — e.g. <code>0 8 * * 5</code> is Fridays at 08:00.
+            </p>
+          </>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error.message}</p>}
 
       <DialogFooter>
         {enabled ? (
@@ -117,8 +188,14 @@ function SetupView({
           </Button>
         )}
         <Button
-          onClick={() => onSave({ enabled: true, withdrawalAccountId: selected })}
-          disabled={!selected || pending}
+          onClick={() =>
+            onSave({
+              enabled: true,
+              withdrawalAccountId: selected,
+              schedule: spec.trim(),
+            })
+          }
+          disabled={!selected || !spec.trim() || pending}
         >
           {pending && <Loader2 className="size-4 animate-spin" />}
           {enabled ? "Save" : "Enable auto-withdraw"}

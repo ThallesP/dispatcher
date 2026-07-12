@@ -5,9 +5,19 @@ import {
 } from "@tanstack/react-query";
 import { api } from "~/lib/api";
 
-export interface PayoutPoint {
+export interface PayoutSeriesEntry {
+  key: string;
+  name: string;
+}
+
+export interface PayoutSeriesPoint {
   sampledAt: string;
-  totalPayout: number;
+  values: Record<string, number>;
+}
+
+export interface PayoutSeriesResponse {
+  series: PayoutSeriesEntry[];
+  points: PayoutSeriesPoint[];
 }
 
 export interface MetricChange {
@@ -51,7 +61,7 @@ export const payoutSeriesQuery = (days: number) =>
     queryFn: ({ signal }) =>
       api
         .get("analytics/payout", { searchParams: { days }, signal })
-        .json<PayoutPoint[]>(),
+        .json<PayoutSeriesResponse>(),
   });
 
 export const summaryQuery = queryOptions({

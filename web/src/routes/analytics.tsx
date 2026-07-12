@@ -94,7 +94,7 @@ export default function Analytics() {
           <CardHeader>
             <CardTitle>Total payout</CardTitle>
             <CardDescription>
-              Cumulative kickback across all templates
+              Cumulative kickback, stacked by template
             </CardDescription>
             <CardAction className="flex gap-1">
               {RANGES.map((r) => (
@@ -112,8 +112,8 @@ export default function Analytics() {
           <CardContent>
             {series.isPending ? (
               <Skeleton className="h-64 w-full" />
-            ) : series.data && series.data.length > 0 ? (
-              <PayoutChart points={series.data} />
+            ) : series.data && series.data.points.length > 0 ? (
+              <PayoutChart data={series.data} />
             ) : (
               <p className="py-8 text-center text-sm text-muted-foreground">
                 No samples in this range yet.
@@ -139,10 +139,10 @@ export default function Analytics() {
               <thead>
                 <tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Template</th>
-                  <th className="pb-2 text-right font-medium">Projects</th>
-                  <th className="pb-2 text-right font-medium">Active</th>
-                  <th className="pb-2 text-right font-medium">Payout</th>
-                  <th className="pb-2 text-right font-medium">Δ payout</th>
+                  <th className="pb-2 pl-3 text-right font-medium">Projects</th>
+                  <th className="pb-2 pl-3 text-right font-medium">Active</th>
+                  <th className="pb-2 pl-3 text-right font-medium">Payout</th>
+                  <th className="pb-2 pl-3 text-right font-medium">Δ payout</th>
                 </tr>
               </thead>
               <tbody>
@@ -242,7 +242,19 @@ function StatTile({
     <Card size="sm">
       <CardContent className="space-y-1">
         <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="text-2xl font-semibold">{value}</div>
+        {/* Full (unabbreviated) values can get long — step the size down so
+            something like $1,234,567,890 still fits the quarter-width tile. */}
+        <div
+          className={`font-semibold tabular-nums ${
+            value.length > 13
+              ? "text-base"
+              : value.length > 10
+                ? "text-xl"
+                : "text-2xl"
+          }`}
+        >
+          {value}
+        </div>
         {change.changePct != null && ago != null ? (
           <div className="flex items-center gap-1 text-xs">
             <span
@@ -278,15 +290,17 @@ function TemplateRow({ template: t }: { template: TemplateAnalytics }) {
         <div className="font-medium">{t.name}</div>
         <div className="text-xs text-muted-foreground">{t.status.toLowerCase()}</div>
       </td>
-      <td className="py-2.5 text-right tabular-nums">{fmtNum(t.projects)}</td>
-      <td className="py-2.5 text-right tabular-nums">
+      <td className="py-2.5 pl-3 text-right tabular-nums">
+        {fmtNum(t.projects)}
+      </td>
+      <td className="py-2.5 pl-3 text-right tabular-nums">
         {fmtNum(t.activeProjects)}
       </td>
-      <td className="py-2.5 text-right font-medium tabular-nums">
+      <td className="whitespace-nowrap py-2.5 pl-3 text-right font-medium tabular-nums">
         {fmtUsd(t.totalPayout)}
       </td>
       <td
-        className={`py-2.5 text-right tabular-nums ${
+        className={`py-2.5 pl-3 text-right tabular-nums ${
           t.payoutChangePct == null
             ? "text-muted-foreground"
             : t.payoutChangePct >= 0
