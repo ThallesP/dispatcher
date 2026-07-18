@@ -669,9 +669,11 @@ function NotificationEditor({
           <div>
             <span className="block text-sm font-medium">Enabled</span>
             <span className="block text-xs text-muted-foreground">
-              {id
-                ? "Delivery pauses while this is off."
-                : "New targets start off — test first, then enable."}
+              {form.enabled
+                ? id
+                  ? "Delivering events — turn off to pause without deleting."
+                  : "Starts delivering as soon as you save."
+                : "Off — events won’t be sent to this target."}
             </span>
           </div>
           <Switch
