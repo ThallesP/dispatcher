@@ -33,6 +33,13 @@ func main() {
 	mux.Handle("GET /api/withdraw/settings", requireAuth(handleWithdrawSettings(db)))
 	mux.Handle("POST /api/withdraw/settings", requireAuth(handleUpdateWithdrawSettings(db)))
 	mux.Handle("GET /api/withdraw/accounts", requireAuth(handleWithdrawAccounts(db)))
+	mux.Handle("GET /api/notify/targets", requireAuth(handleNotificationTargets(db)))
+	mux.Handle("POST /api/notify/targets", requireAuth(handleCreateNotificationTarget(db)))
+	mux.Handle("PUT /api/notify/targets/{id}", requireAuth(handleUpdateNotificationTarget(db)))
+	mux.Handle("DELETE /api/notify/targets/{id}", requireAuth(handleDeleteNotificationTarget(db)))
+	mux.Handle("POST /api/notify/targets/{id}/test", requireAuth(handleTestNotificationTarget(db)))
+	mux.Handle("POST /api/notify/test", requireAuth(http.HandlerFunc(handleTestNotificationDraft)))
+	mux.Handle("GET /api/notify/presets", requireAuth(http.HandlerFunc(handleNotificationPresets)))
 	mux.Handle("/", spaHandler())
 
 	port := os.Getenv("PORT")

@@ -1,6 +1,7 @@
 import { ChevronDown, LogOut, RefreshCw, TrainFront } from "lucide-react";
 import { Link, Outlet, useRevalidator } from "react-router";
 import { AutoWithdraw } from "~/components/auto-withdraw-dialog";
+import { NotificationsDialog } from "~/components/notifications-dialog";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -93,6 +94,7 @@ function Header({ user }: { user: User }) {
         </Link>
         <div className="flex items-center gap-3">
           <RefreshButton />
+          <NotificationsDialog />
           <AutoWithdraw />
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="ghost" size="sm" />}>
