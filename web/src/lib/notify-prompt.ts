@@ -18,7 +18,7 @@ Sample: .Title = "Weekly template summary"; .Message = a ready multi-line recap 
 
 const KIND_NOTES: Record<NotificationKind, string> = {
   discord:
-    'a Discord webhook — the body must be Discord webhook JSON, e.g. {"content": ...} or an embeds payload',
+    'a Discord webhook — the body must be Discord webhook JSON, e.g. an embeds payload or {"content": ...}',
   slack:
     'a Slack incoming webhook — the body must be Slack JSON, e.g. {"text": ...} or Block Kit blocks',
   ntfy: "an ntfy topic — the body is the plain-text message; headers like X-Title, X-Priority, and X-Tags control the rest",

@@ -571,7 +571,10 @@ function NotificationEditor({
                   bodyTemplate: event.target.value,
                 }));
               }}
-              rows={6}
+              rows={Math.min(
+                14,
+                Math.max(6, form.bodyTemplate.split("\n").length + 1),
+              )}
               spellCheck={false}
               className={`${textareaClass} resize-y font-mono text-xs`}
             />

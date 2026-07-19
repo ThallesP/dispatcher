@@ -68,12 +68,23 @@ type notificationPreset struct {
 
 var notificationPresets = map[string]notificationPreset{
 	"discord": {
-		Headers:      map[string]string{},
-		BodyTemplate: `{"content": {{json .Message}}}`,
+		Headers: map[string]string{},
+		BodyTemplate: `{
+  "embeds": [
+    {
+      "title": {{json .Title}},
+      "description": {{json .Message}},
+      "color": 8731598,
+      "timestamp": {{json .OccurredAt}}
+    }
+  ]
+}`,
 	},
 	"slack": {
-		Headers:      map[string]string{},
-		BodyTemplate: `{"text": {{json .Message}}}`,
+		Headers: map[string]string{},
+		BodyTemplate: `{
+  "text": {{json .Message}}
+}`,
 	},
 	"ntfy": {
 		Headers: map[string]string{
