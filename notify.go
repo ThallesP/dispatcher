@@ -50,6 +50,7 @@ type WeeklyTemplateSummary struct {
 	Name           string   `json:"name"`
 	NetNewProjects int64    `json:"netNewProjects"`
 	PayoutDelta    float64  `json:"payoutDelta"`
+	PayoutDeltaUSD string   `json:"payoutDeltaUSD"`
 	Health         *float64 `json:"health"`
 }
 
@@ -58,7 +59,9 @@ type WeeklySummaryNotificationData struct {
 	To                  time.Time               `json:"to"`
 	Templates           []WeeklyTemplateSummary `json:"templates"`
 	TotalPayoutDelta    float64                 `json:"totalPayoutDelta"`
+	TotalPayoutDeltaUSD string                  `json:"totalPayoutDeltaUSD"`
 	TotalNetNewProjects int64                   `json:"totalNetNewProjects"`
+	Positive            bool                    `json:"positive"`
 }
 
 type notificationPreset struct {
@@ -73,8 +76,17 @@ var notificationPresets = map[string]notificationPreset{
   "embeds": [
     {
       "title": {{json .Title}},
-      "description": {{json .Message}},
-      "color": 8731598,
+      "color": {{if eq .Event "payout"}}5763719{{else if eq .Event "health_drop"}}15548997{{else if .Data.Positive}}5763719{{else}}15548997{{end}},
+      "fields": [{{if eq .Event "payout"}}
+        { "name": "Amount", "value": {{json .Data.Amount}}, "inline": true },
+        { "name": "Account", "value": {{json .Data.AccountID}}, "inline": true }{{else if eq .Event "health_drop"}}
+        { "name": "Template", "value": {{json .Data.TemplateName}}, "inline": true },
+        { "name": "Health", "value": "{{printf "%.0f" .Data.Previous}}% → {{printf "%.0f" .Data.Current}}%", "inline": true },
+        { "name": "Threshold", "value": "{{printf "%.0f" .Data.Threshold}}%", "inline": true }{{else}}
+        { "name": "Net new projects", "value": "{{printf "%+d" .Data.TotalNetNewProjects}}", "inline": true },
+        { "name": "Payout", "value": {{json .Data.TotalPayoutDeltaUSD}}, "inline": true }{{range .Data.Templates}},
+        { "name": {{json .Name}}, "value": "{{printf "%+d" .NetNewProjects}} projects · {{.PayoutDeltaUSD}}{{if .Health}} · {{.Health}}% health{{end}}" }{{end}}{{end}}
+      ],
       "timestamp": {{json .OccurredAt}}
     }
   ]
@@ -83,12 +95,29 @@ var notificationPresets = map[string]notificationPreset{
 	"slack": {
 		Headers: map[string]string{},
 		BodyTemplate: `{
-  "text": {{json .Message}}
+  "attachments": [
+    {
+      "color": "{{if eq .Event "payout"}}good{{else if eq .Event "health_drop"}}danger{{else if .Data.Positive}}good{{else}}danger{{end}}",
+      "title": {{json .Title}},
+      "fallback": {{json .Title}},
+      "fields": [{{if eq .Event "payout"}}
+        { "title": "Amount", "value": {{json .Data.Amount}}, "short": true },
+        { "title": "Account", "value": {{json .Data.AccountID}}, "short": true }{{else if eq .Event "health_drop"}}
+        { "title": "Template", "value": {{json .Data.TemplateName}}, "short": true },
+        { "title": "Health", "value": "{{printf "%.0f" .Data.Previous}}% → {{printf "%.0f" .Data.Current}}%", "short": true }{{else}}
+        { "title": "Net new projects", "value": "{{printf "%+d" .Data.TotalNetNewProjects}}", "short": true },
+        { "title": "Payout", "value": {{json .Data.TotalPayoutDeltaUSD}}, "short": true }{{range .Data.Templates}},
+        { "title": {{json .Name}}, "value": "{{printf "%+d" .NetNewProjects}} projects · {{.PayoutDeltaUSD}}{{if .Health}} · {{.Health}}% health{{end}}" }{{end}}{{end}}
+      ]
+    }
+  ]
 }`,
 	},
 	"ntfy": {
 		Headers: map[string]string{
 			"X-Title":      "{{.Title}}",
+			"X-Tags":       `{{if eq .Event "payout"}}moneybag{{else if eq .Event "health_drop"}}rotating_light{{else if .Data.Positive}}chart_with_upwards_trend{{else}}chart_with_downwards_trend{{end}}`,
+			"X-Priority":   `{{if eq .Event "health_drop"}}4{{else}}3{{end}}`,
 			"Content-Type": "text/plain",
 		},
 		BodyTemplate: "{{.Message}}",
@@ -474,11 +503,16 @@ func cloneFloat64(value *float64) *float64 {
 }
 
 func weeklySummaryEvent(data WeeklySummaryNotificationData, occurredAt time.Time) NotificationEvent {
+	data.Positive = data.TotalPayoutDelta >= 0
+	data.TotalPayoutDeltaUSD = signedUSD(data.TotalPayoutDelta)
+	for i := range data.Templates {
+		data.Templates[i].PayoutDeltaUSD = signedUSD(data.Templates[i].PayoutDelta)
+	}
 	var message strings.Builder
 	message.WriteString("Weekly template summary")
-	message.WriteString(fmt.Sprintf("\n%+d net new projects · %s payout", data.TotalNetNewProjects, signedUSD(data.TotalPayoutDelta)))
+	message.WriteString(fmt.Sprintf("\n%+d net new projects · %s payout", data.TotalNetNewProjects, data.TotalPayoutDeltaUSD))
 	for _, item := range data.Templates {
-		message.WriteString(fmt.Sprintf("\n%s: %+d projects · %s payout", item.Name, item.NetNewProjects, signedUSD(item.PayoutDelta)))
+		message.WriteString(fmt.Sprintf("\n%s: %+d projects · %s payout", item.Name, item.NetNewProjects, item.PayoutDeltaUSD))
 	}
 	return NotificationEvent{
 		Event:      "weekly_summary",

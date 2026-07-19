@@ -13,7 +13,7 @@ Sample: .Title = "Template health dropped"; .Message = "Example template health 
 .Data fields: .Data.TemplateName = "Example template", .Data.TemplateID = "template_example", .Data.Previous = 96, .Data.Current = 87, .Data.Threshold = 90`,
   weekly_summary: `weekly_summary — Monday-morning recap of the last 7 days.
 Sample: .Title = "Weekly template summary"; .Message = a ready multi-line recap ("+12 net new projects · +$45.67 payout" plus one line per template).
-.Data fields: .Data.From and .Data.To (the week's range), .Data.TotalNetNewProjects = 12, .Data.TotalPayoutDelta = 45.67, and .Data.Templates — a list to {{range}} over where each item has .Name, .NetNewProjects, .PayoutDelta, and .Health (0-100, may be null)`,
+.Data fields: .Data.From and .Data.To (the week's range), .Data.TotalNetNewProjects = 12, .Data.TotalPayoutDelta = 45.67, .Data.TotalPayoutDeltaUSD = "+$45.67", .Data.Positive = true when the total payout delta is >= 0 (useful for colors), and .Data.Templates — a list to {{range}} over where each item has .Name, .NetNewProjects, .PayoutDelta, .PayoutDeltaUSD, and .Health (0-100, may be null)`,
 };
 
 const KIND_NOTES: Record<NotificationKind, string> = {
