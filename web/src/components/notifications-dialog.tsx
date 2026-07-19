@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowUpRight,
   Bell,
+  Check,
   ChevronDown,
   ChevronLeft,
+  Copy,
   Loader2,
   Pencil,
   Plus,
@@ -19,6 +22,7 @@ import {
   DialogTitle,
 } from "~/components/ui/dialog";
 import { Skeleton } from "~/components/ui/skeleton";
+import { templateHelpPrompt } from "~/lib/notify-prompt";
 import { cn } from "~/lib/utils";
 import {
   deleteNotificationTarget,
@@ -343,6 +347,7 @@ function NotificationEditor({
   const [headersTouched, setHeadersTouched] = useState(false);
   const [testEvent, setTestEvent] =
     useState<NotificationEventType>("payout");
+  const [promptCopied, setPromptCopied] = useState(false);
 
   const kindMeta = KINDS.find((kind) => kind.value === form.kind) ?? KINDS[3];
 
@@ -537,6 +542,45 @@ function NotificationEditor({
               <code>{"{{json .Message}}"}</code> inside JSON.
             </p>
           </Field>
+
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border border-dashed p-2.5">
+            <p className="min-w-40 flex-1 text-xs text-muted-foreground">
+              Want help writing this? Copy a prompt with the payload format and
+              your draft, ask any AI assistant, then paste its template back.
+            </p>
+            <div className="flex gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(
+                    templateHelpPrompt(currentTarget()),
+                  );
+                  setPromptCopied(true);
+                  setTimeout(() => setPromptCopied(false), 2000);
+                }}
+              >
+                {promptCopied ? <Check /> : <Copy />}
+                {promptCopied ? "Copied" : "Copy prompt"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() =>
+                  window.open(
+                    `https://chatgpt.com/?q=${encodeURIComponent(templateHelpPrompt(currentTarget()))}`,
+                    "_blank",
+                    "noopener",
+                  )
+                }
+              >
+                Open in ChatGPT
+                <ArrowUpRight />
+              </Button>
+            </div>
+          </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
