@@ -32,6 +32,12 @@ Note: `go build` embeds `web/build/client`, so the frontend must be built first 
 
 GORM with DuckDB (via `github.com/vogo/duckdb/v2`). Data lives in `dispatcher.duckdb` next to the binary (override with `DB_PATH`); `db.go` holds the models and connection, and `AutoMigrate` runs on startup. Building needs CGO (DuckDB links a C library) — already the Go default.
 
+## Notifications
+
+Notification targets send payout requests, template health drops, and weekly template summaries to Discord, Slack, ntfy, or a custom HTTP webhook. Targets use editable Go text/templates and can be tested before they are enabled.
+
+Background collection, auto-withdraw, weekly summaries, and notification delivery assume the app runs as a single process. Running multiple replicas can duplicate cron work and notifications.
+
 ## Adding things
 
 - **API route**: register another `mux.HandleFunc("GET /api/...")` in `main.go`, implement it in `handlers.go`.

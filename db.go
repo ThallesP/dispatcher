@@ -58,12 +58,30 @@ type AutoWithdrawSettings struct {
 	UpdatedAt           time.Time `json:"-"`
 }
 
+type NotificationTarget struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+	URL  string `json:"url"`
+	// HeadersJSON stores a JSON-encoded map[string]string for DuckDB/GORM.
+	// The notification API exposes it as a "headers" object.
+	HeadersJSON  string `json:"-"`
+	BodyTemplate string `json:"bodyTemplate"`
+	Enabled      bool   `json:"enabled"`
+
+	OnPayout        bool      `json:"onPayout"`
+	OnHealthDrop    bool      `json:"onHealthDrop"`
+	OnWeeklySummary bool      `json:"onWeeklySummary"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
 func openDB(dsn string) *gorm.DB {
 	db, err := gorm.Open(duckdb.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("open database %s: %v", dsn, err)
 	}
-	if err := db.AutoMigrate(&RailwayCredentials{}, &TemplateSnapshot{}, &AutoWithdrawSettings{}); err != nil {
+	if err := db.AutoMigrate(&RailwayCredentials{}, &TemplateSnapshot{}, &AutoWithdrawSettings{}, &NotificationTarget{}); err != nil {
 		log.Fatalf("migrate database: %v", err)
 	}
 	// Seed the singleton settings row so later saves are plain updates (GORM's

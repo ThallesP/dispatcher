@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -10,7 +12,10 @@ import (
 	"gorm.io/gorm"
 )
 
-const templateSnapshotSpec = "@hourly"
+const (
+	templateSnapshotSpec = "@hourly"
+	weeklySummarySpec    = "0 9 * * MON"
+)
 
 // defaultAutoWithdrawSpec runs the payout job once a day at 08:00 UTC. ACH
 // batches clear on US business mornings, so submitting in the early US morning
@@ -55,6 +60,9 @@ func startCrons(db *gorm.DB) *cron.Cron {
 	if _, err := c.AddFunc(templateSnapshotSpec, func() { runTemplateSnapshots(db) }); err != nil {
 		log.Fatalf("schedule template snapshots: %v", err)
 	}
+	if _, err := c.AddFunc(weeklySummarySpec, func() { runWeeklySummary(db) }); err != nil {
+		log.Fatalf("schedule weekly summary: %v", err)
+	}
 	autoWithdrawEntry.c = c
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -86,7 +94,26 @@ func runTemplateSnapshots(db *gorm.DB) {
 	}
 }
 
+func runWeeklySummary(db *gorm.DB) {
+	ev, ok, err := loadWeeklySummary(db, time.Now().UTC())
+	if err != nil {
+		log.Printf("weekly summary: %v", err)
+		return
+	}
+	if ok {
+		go notifyAll(db, ev)
+	}
+}
+
+// All snapshot entrypoints share this collector. Serializing it prevents a
+// startup/manual run from observing the same previous health as the cron and
+// emitting a duplicate threshold crossing.
+var templateSnapshotMu sync.Mutex
+
 func collectTemplateSnapshots(db *gorm.DB) error {
+	templateSnapshotMu.Lock()
+	defer templateSnapshotMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -108,6 +135,18 @@ func collectTemplateSnapshots(db *gorm.DB) error {
 	}
 
 	sampledAt := time.Now().UTC()
+	previous := make(map[string]TemplateSnapshot, len(templates))
+	for _, t := range templates {
+		snapshot, err := gorm.G[TemplateSnapshot](db).
+			Where("template_id = ?", t.ID).
+			Order("sampled_at DESC, id DESC").
+			First(ctx)
+		if err == nil {
+			previous[t.ID] = snapshot
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	}
 	snapshots := make([]TemplateSnapshot, 0, len(templates))
 	for _, t := range templates {
 		snapshot := TemplateSnapshot{
@@ -131,6 +170,13 @@ func collectTemplateSnapshots(db *gorm.DB) error {
 	}
 	if err := gorm.G[TemplateSnapshot](db).CreateInBatches(ctx, &snapshots, 100); err != nil {
 		return err
+	}
+	for _, snapshot := range snapshots {
+		prev, ok := previous[snapshot.TemplateID]
+		if !ok || !crossedHealthThreshold(prev.Health, snapshot.Health) {
+			continue
+		}
+		go notifyAll(db, healthDropEvent(snapshot, *prev.Health))
 	}
 	log.Printf("template snapshots: stored %d templates", len(snapshots))
 	return nil
@@ -203,4 +249,16 @@ func runAutoWithdraw(db *gorm.DB) {
 		return
 	}
 	log.Printf("auto-withdraw: requested $%.2f withdrawal", float64(amount)/100)
+	formattedAmount := fmt.Sprintf("$%.2f", float64(amount)/100)
+	go notifyAll(db, NotificationEvent{
+		Event:      "payout",
+		Title:      "Withdrawal requested",
+		Message:    fmt.Sprintf("Requested a %s withdrawal from your Railway balance.", formattedAmount),
+		OccurredAt: time.Now().UTC(),
+		Data: PayoutNotificationData{
+			AmountCents: amount,
+			Amount:      formattedAmount,
+			AccountID:   s.WithdrawalAccountID,
+		},
+	})
 }
