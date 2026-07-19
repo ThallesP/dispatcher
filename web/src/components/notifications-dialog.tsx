@@ -414,8 +414,8 @@ function NotificationEditor({
           <DialogTitle>{id ? "Edit target" : "Add target"}</DialogTitle>
         </div>
         <DialogDescription>
-          Pick a service, paste its webhook URL, send yourself a test, then
-          turn it on.
+          Pick a service, paste its webhook URL, and send yourself a test —
+          then turn it on from the list.
         </DialogDescription>
       </DialogHeader>
 
@@ -716,28 +716,6 @@ function NotificationEditor({
             {test.isSuccess ? "Test delivered." : test.error?.message}
           </p>
         )}
-        <div className="flex items-center justify-between gap-3 border-t p-3">
-          <div>
-            <span className="block text-sm font-medium">Enabled</span>
-            <span className="block text-xs text-muted-foreground">
-              {form.enabled
-                ? id
-                  ? "Delivering events — turn off to pause without deleting."
-                  : "Starts delivering as soon as you save."
-                : "Off — events won’t be sent to this target."}
-            </span>
-          </div>
-          <Switch
-            checked={form.enabled}
-            label="Enabled"
-            onToggle={() =>
-              setForm((current) => ({
-                ...current,
-                enabled: !current.enabled,
-              }))
-            }
-          />
-        </div>
       </div>
 
       {save.isError && (
