@@ -675,21 +675,24 @@ function NotificationEditor({
             </span>
           </div>
           <div className="flex gap-2">
-            <select
-              value={testEvent}
-              aria-label="Test event type"
-              onChange={(event) => {
-                setTestEvent(event.target.value as NotificationEventType);
-                test.reset();
-              }}
-              className={cn(inputClass, "h-8 w-auto")}
-            >
-              {EVENTS.map((event) => (
-                <option key={event.value} value={event.value}>
-                  {event.label}
-                </option>
-              ))}
-            </select>
+            <span className="relative">
+              <select
+                value={testEvent}
+                aria-label="Test event type"
+                onChange={(event) => {
+                  setTestEvent(event.target.value as NotificationEventType);
+                  test.reset();
+                }}
+                className={cn(inputClass, "h-8 w-auto appearance-none pr-8")}
+              >
+                {EVENTS.map((event) => (
+                  <option key={event.value} value={event.value}>
+                    {event.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            </span>
             <Button
               type="button"
               variant="outline"
