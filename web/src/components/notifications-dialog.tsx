@@ -110,7 +110,7 @@ function newTarget(preset: NotificationPreset): NotificationTargetInput {
     url: "",
     headers: { ...preset.headers },
     bodyTemplate: preset.bodyTemplate,
-    enabled: false,
+    enabled: true,
     onPayout: true,
     onHealthDrop: true,
     onWeeklySummary: true,
@@ -191,8 +191,8 @@ function Switch({
     >
       <span
         className={cn(
-          "absolute top-0.5 size-4 rounded-full bg-white transition-transform",
-          checked ? "translate-x-4" : "translate-x-0.5",
+          "absolute top-0.5 left-0 size-4 rounded-full bg-white transition-transform",
+          checked ? "translate-x-4.5" : "translate-x-0.5",
         )}
       />
     </button>
@@ -414,8 +414,8 @@ function NotificationEditor({
           <DialogTitle>{id ? "Edit target" : "Add target"}</DialogTitle>
         </div>
         <DialogDescription>
-          Pick a service, paste its webhook URL, and send yourself a test —
-          then turn it on from the list.
+          Pick a service, paste its webhook URL, and send yourself a test.
+          New targets start enabled — pause them from the list.
         </DialogDescription>
       </DialogHeader>
 
