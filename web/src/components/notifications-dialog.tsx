@@ -520,8 +520,48 @@ function NotificationEditor({
           <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
         </summary>
         <div className="space-y-4 border-t p-3">
-          <Field label="Body template">
+          <div className="grid gap-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="notify-body-template" className="text-sm font-medium">
+                Body template
+              </label>
+              <div className="flex gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  title="Copy a prompt with the payload format and your draft — ask any AI assistant, then paste its template back"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(
+                      templateHelpPrompt(currentTarget()),
+                    );
+                    setPromptCopied(true);
+                    setTimeout(() => setPromptCopied(false), 2000);
+                  }}
+                >
+                  {promptCopied ? <Check /> : <Copy />}
+                  {promptCopied ? "Copied" : "Copy AI prompt"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  title="Open ChatGPT with the prompt pre-filled"
+                  onClick={() =>
+                    window.open(
+                      `https://chatgpt.com/?q=${encodeURIComponent(templateHelpPrompt(currentTarget()))}`,
+                      "_blank",
+                      "noopener",
+                    )
+                  }
+                >
+                  ChatGPT
+                  <ArrowUpRight />
+                </Button>
+              </div>
+            </div>
             <textarea
+              id="notify-body-template"
               required
               value={form.bodyTemplate}
               onChange={(event) => {
@@ -541,45 +581,6 @@ function NotificationEditor({
               <code>{"{{.OccurredAt}}"}</code>, and <code>.Data</code>. Use{" "}
               <code>{"{{json .Message}}"}</code> inside JSON.
             </p>
-          </Field>
-
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border border-dashed p-2.5">
-            <p className="min-w-40 flex-1 text-xs text-muted-foreground">
-              Want help writing this? Copy a prompt with the payload format and
-              your draft, ask any AI assistant, then paste its template back.
-            </p>
-            <div className="flex gap-1.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(
-                    templateHelpPrompt(currentTarget()),
-                  );
-                  setPromptCopied(true);
-                  setTimeout(() => setPromptCopied(false), 2000);
-                }}
-              >
-                {promptCopied ? <Check /> : <Copy />}
-                {promptCopied ? "Copied" : "Copy prompt"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={() =>
-                  window.open(
-                    `https://chatgpt.com/?q=${encodeURIComponent(templateHelpPrompt(currentTarget()))}`,
-                    "_blank",
-                    "noopener",
-                  )
-                }
-              >
-                Open in ChatGPT
-                <ArrowUpRight />
-              </Button>
-            </div>
           </div>
 
           <div className="space-y-2">
