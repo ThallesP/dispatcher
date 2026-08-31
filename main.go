@@ -33,6 +33,7 @@ func main() {
 	mux.Handle("GET /api/analytics/summary", auth(handleAnalyticsSummary(db)))
 	mux.Handle("GET /api/analytics/templates", auth(handleTemplateAnalytics(db)))
 	mux.Handle("POST /api/analytics/refresh", auth(handleRefreshAnalytics(db)))
+	mux.Handle("GET /api/payouts", auth(handlePayoutHistory(db)))
 	mux.Handle("GET /api/withdraw/settings", auth(handleWithdrawSettings(db)))
 	mux.Handle("POST /api/withdraw/settings", auth(handleUpdateWithdrawSettings(db)))
 	mux.Handle("GET /api/withdraw/accounts", auth(handleWithdrawAccounts(db)))

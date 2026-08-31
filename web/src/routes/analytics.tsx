@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { useState } from "react";
 import { PayoutChart } from "~/components/payout-chart";
+import { PayoutHistory } from "~/components/payout-history";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -122,6 +123,8 @@ export default function Analytics() {
           </CardContent>
         </Card>
       )}
+
+      {hasData && <PayoutHistory />}
 
       {hasData && templates.isPending && <TableCardSkeleton />}
       {templates.data && templates.data.templates.length > 0 && (

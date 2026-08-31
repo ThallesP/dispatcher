@@ -429,3 +429,103 @@ func createCashWithdrawal(ctx context.Context, accessToken, customerID, accountI
 	}
 	return nil
 }
+
+// unifiedWithdrawalsQuery is Railway's payout history — the same query their
+// billing dashboard issues. The connection is a union: cash payouts
+// (Withdrawal) carry an id, a status and the destination account, while credit
+// payouts (CreditWithdrawalInfo) expose only an amount and a date. Newest
+// first.
+const unifiedWithdrawalsQuery = `query unifiedWithdrawalsV2($first: Int, $after: String, $customerId: String!) {
+  unifiedWithdrawalsV2(first: $first, after: $after, customerId: $customerId) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    edges {
+      node {
+        __typename
+        ... on Withdrawal {
+          id
+          amount
+          status
+          createdAt
+          withdrawalAccount {
+            id
+            platform
+            stripeConnectInfo {
+              bankLast4
+              cardLast4
+            }
+          }
+        }
+        ... on CreditWithdrawalInfo {
+          amount
+          createdAt
+        }
+      }
+    }
+  }
+}`
+
+// payoutRecord is one entry of Railway's payout history. Typename
+// discriminates the union arm, so the cash-only fields (ID, Status, Account)
+// are zero on a credit payout.
+type payoutRecord struct {
+	Typename  string    `json:"__typename"`
+	ID        string    `json:"id"`
+	Amount    int64     `json:"amount"` // cents
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"createdAt"`
+	Account   struct {
+		ID            string `json:"id"`
+		Platform      string `json:"platform"`
+		StripeConnect struct {
+			BankLast4 string `json:"bankLast4"`
+			CardLast4 string `json:"cardLast4"`
+		} `json:"stripeConnectInfo"`
+	} `json:"withdrawalAccount"`
+}
+
+const (
+	payoutPageSize = 100
+	// maxPayoutPages bounds the cursor walk so a pathological history can
+	// never spin a request forever. 100 × 20 = 2,000 payouts, several years of
+	// daily withdrawals.
+	maxPayoutPages = 20
+)
+
+// getPayoutHistory walks the whole payout connection, newest first. Railway
+// exposes no aggregate resolver, so charting monthly totals means reading
+// every page. truncated reports that the walk hit maxPayoutPages before the
+// end of the history.
+func getPayoutHistory(ctx context.Context, accessToken, customerID string) (records []payoutRecord, truncated bool, err error) {
+	endpoint := railwayGraphQLInternalURL + "?q=unifiedWithdrawalsV2"
+	after := ""
+	for range maxPayoutPages {
+		var data struct {
+			Connection struct {
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+				Edges []struct {
+					Node payoutRecord `json:"node"`
+				} `json:"edges"`
+			} `json:"unifiedWithdrawalsV2"`
+		}
+		variables := map[string]any{"first": payoutPageSize, "after": after, "customerId": customerID}
+		if err := graphqlRequest(ctx, endpoint, accessToken, unifiedWithdrawalsQuery, variables, &data); err != nil {
+			return nil, false, err
+		}
+		for _, edge := range data.Connection.Edges {
+			records = append(records, edge.Node)
+		}
+		// An empty cursor with more pages claimed would loop forever on the
+		// same page, so treat it as the end of the history.
+		if !data.Connection.PageInfo.HasNextPage || data.Connection.PageInfo.EndCursor == "" {
+			return records, false, nil
+		}
+		after = data.Connection.PageInfo.EndCursor
+	}
+	return records, true, nil
+}
