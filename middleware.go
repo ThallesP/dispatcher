@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -69,4 +70,16 @@ func rejectSession(w http.ResponseWriter) {
 func authUserFrom(r *http.Request) authUser {
 	user, _ := r.Context().Value(userKey{}).(authUser)
 	return user
+}
+
+// noStoreAPI keeps every /api response out of shared caches. Behind a CDN the
+// responses are per-user (payouts, withdraw settings, the session itself), and
+// the OAuth routes answer with redirects that caches would otherwise reuse.
+func noStoreAPI(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }

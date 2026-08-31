@@ -136,6 +136,28 @@ make build-cli CLI_VERSION=v0.1.0
 Pushing a `v*` tag runs the CLI release workflow and publishes the archives
 used by the installer.
 
+## CDN and caching
+
+Railway's CDN sits in front of the service, and it caches from the origin's own
+headers — the cache rules live in `spa.go`, not in a dashboard:
+
+| Response | `Cache-Control` | Why |
+| --- | --- | --- |
+| `/assets/*` | `public, max-age=31536000, immutable` | Vite fingerprints the filename, so a URL's content never changes; a deploy publishes new URLs |
+| `index.html` (incl. the client-route fallback) | `no-cache` | The shell keeps its URL across deploys, so it must be revalidated or it would keep pointing at deleted assets |
+| `favicon.*` and other unhashed files | `public, max-age=3600, stale-while-revalidate=86400` | Same URL across deploys, but stale for an hour is harmless |
+| `/api/*` | `no-store` | Per-user data behind the session cookie, plus OAuth redirects |
+| Missing files | `no-store` | A 404 from a bad deploy should not be pinned at the edge |
+
+Every static response also carries an ETag hashed from its bytes at startup, so
+a revalidation costs a 304 instead of a re-download.
+
+Two rules the SPA fallback depends on: `/analytics` and friends answer with the
+shell or a 404 depending on `Accept`, so those responses send `Vary: Accept`;
+and the shell is only ever `no-cache`, which is what keeps a deploy from
+serving an old `index.html` that references assets the new build removed. A
+purge is not needed on deploy — asset URLs change and the shell revalidates.
+
 ## Adding things
 
 - **API route**: register another `mux.HandleFunc("GET /api/...")` in `main.go`, implement it in `handlers.go`.
