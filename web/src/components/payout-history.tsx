@@ -119,10 +119,10 @@ export function PayoutHistory() {
             )}
           </CardContent>
 
-          <CardContent className="overflow-x-auto">
+          <CardContent className="max-h-[32rem] overflow-auto">
             <table className="w-full text-sm">
               <caption className="sr-only">
-                The {data.payouts.length} most recent payouts, newest first
+                Payouts in the last {days} days, newest first
               </caption>
               <thead>
                 <tr className="border-b text-left text-xs text-muted-foreground">
@@ -140,8 +140,8 @@ export function PayoutHistory() {
             </table>
             {data.totalRows > data.payouts.length && (
               <p className="pt-3 text-xs text-muted-foreground">
-                Showing the {data.payouts.length} most recent of{" "}
-                {fmtNum(data.totalRows)} payouts.
+                {fmtNum(data.payouts.length)} payouts in the last {days} days;{" "}
+                {fmtNum(data.totalRows - data.payouts.length)} more before that.
               </p>
             )}
           </CardContent>
