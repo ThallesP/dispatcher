@@ -58,6 +58,22 @@ secret is the encryption key.
 
 Notification targets send payout requests, template health drops, and weekly template summaries to Discord, Slack, ntfy, or a custom HTTP webhook. Targets use editable Go text/templates and can be tested before they are enabled.
 
+### Which template earned each payout
+
+Railway's payout ledger says how much each kickback credit was worth but not
+which template earned it. Dispatcher works it out: every hour it snapshots
+each template's lifetime earnings, and the credit payouts that arrive between
+two snapshots must sum, per template, to that template's earnings delta. The
+collector matches new payouts to templates by finding the partition of the
+window's payouts that reproduces those deltas, and stores the result on the
+payout row (`templateId`, `templateName` in `/api/payouts` and
+`dispatcherctl payouts`, a Template column in the payouts table). Payouts
+older than the first snapshot can never be matched and are marked
+`untracked` ("before tracking"); a payout the snapshots cannot explain yet
+stays `pending` and is retried after each snapshot, and is marked `unknown`
+after two days. Cash withdrawals are lump sums of the balance and are never
+attributed.
+
 Background collection, auto-withdraw, weekly summaries, and notification delivery assume the app runs as a single process. Running multiple replicas can duplicate cron work and notifications.
 
 ## CLI

@@ -12,6 +12,11 @@ export interface Payout {
   kind: "cash" | "credits";
   /** "Bank ••8149" / "Card ••4242" / "Railway credits". */
   destination: string;
+  /** Template that earned this credit payout, matched from snapshot deltas.
+   * Empty while the match is pending, "unknown" if it never resolved,
+   * "untracked" if the payout predates the first snapshot. */
+  templateId: string;
+  templateName: string;
 }
 
 /** One day of the chart. Amounts are cumulative from the start of the selected
@@ -43,6 +48,19 @@ export interface PayoutTotals {
   lastPayoutAt: string | null;
 }
 
+/** One template's share of the window's credit payouts. Payouts still
+ * awaiting attribution group under templateId "pending", ones the matcher
+ * gave up on under "unknown", ones older than the first snapshot under
+ * "untracked". */
+export const PSEUDO_TEMPLATE_IDS = new Set(["pending", "unknown", "untracked"]);
+
+export interface PayoutTemplateTotal {
+  templateId: string;
+  templateName: string;
+  count: number;
+  cents: number;
+}
+
 export interface PayoutHistory {
   points: PayoutPoint[];
   window: PayoutWindow;
@@ -50,6 +68,8 @@ export interface PayoutHistory {
   /** Only the most recent rows; totalRows is how many exist in all. */
   payouts: Payout[];
   totalRows: number;
+  /** The window's credit payouts per template, largest earner first. */
+  byTemplate: PayoutTemplateTotal[];
 }
 
 /** Served from Dispatcher's own database — the collector mirrors Railway's

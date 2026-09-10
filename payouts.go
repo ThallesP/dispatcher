@@ -78,6 +78,17 @@ type payoutTotals struct {
 	LastPayoutAt  *time.Time `json:"lastPayoutAt"`
 }
 
+// payoutTemplateTotal is one line of the per-template breakdown: how many
+// credit payouts a template earned in the selected window and what they added
+// up to. Payouts still awaiting attribution group under "pending", ones the
+// matcher gave up on under "unknown" (see attribute.go).
+type payoutTemplateTotal struct {
+	TemplateID   string `json:"templateId"`
+	TemplateName string `json:"templateName"`
+	Count        int    `json:"count"`
+	Cents        int64  `json:"cents"`
+}
+
 type payoutHistoryResponse struct {
 	Points []payoutPoint `json:"points"`
 	Window payoutWindow  `json:"window"`
@@ -86,6 +97,9 @@ type payoutHistoryResponse struct {
 	// TotalRows how many exist in all — so the table can say what it is hiding.
 	Payouts   []Payout `json:"payouts"`
 	TotalRows int      `json:"totalRows"`
+	// ByTemplate breaks the window's credit payouts down per template, largest
+	// earner first.
+	ByTemplate []payoutTemplateTotal `json:"byTemplate"`
 }
 
 // handlePayoutHistory serves the payout dashboard straight from DuckDB.
@@ -100,7 +114,7 @@ func handlePayoutHistory(db *gorm.DB) http.HandlerFunc {
 		}
 		payouts := []Payout{}
 		err := db.WithContext(r.Context()).Raw(`
-			SELECT id, created_at, amount_cents, status, kind, destination
+			SELECT id, created_at, amount_cents, status, kind, destination, template_id, template_name
 			FROM payouts
 			ORDER BY created_at DESC`).Scan(&payouts).Error
 		if err != nil {
@@ -112,14 +126,15 @@ func handlePayoutHistory(db *gorm.DB) http.HandlerFunc {
 }
 
 // buildPayoutHistory turns the stored payouts into the windowed cumulative
-// series, the window/previous-window comparison, lifetime totals and the
-// recent rows the table shows.
+// series, the window/previous-window comparison, lifetime totals, the recent
+// rows the table shows and the per-template breakdown of the window.
 func buildPayoutHistory(payouts []Payout, days int, now time.Time) payoutHistoryResponse {
 	resp := payoutHistoryResponse{
-		Points:    []payoutPoint{},
-		Payouts:   []Payout{},
-		Window:    payoutWindow{Days: days},
-		TotalRows: len(payouts),
+		Points:     []payoutPoint{},
+		Payouts:    []Payout{},
+		ByTemplate: []payoutTemplateTotal{},
+		Window:     payoutWindow{Days: days},
+		TotalRows:  len(payouts),
 	}
 
 	// Newest first for the table. The SQL already orders this way, but the
@@ -143,6 +158,7 @@ func buildPayoutHistory(payouts []Payout, days int, now time.Time) payoutHistory
 	perDayCash := map[string]int64{}
 	perDayCredits := map[string]int64{}
 	perDayCount := map[string]int{}
+	byTemplate := map[string]*payoutTemplateTotal{}
 
 	for _, p := range sorted {
 		at := p.CreatedAt.UTC()
@@ -180,6 +196,19 @@ func buildPayoutHistory(payouts []Payout, days int, now time.Time) payoutHistory
 			}
 			resp.Window.TotalCents += p.AmountCents
 			resp.Window.Count++
+			if credits {
+				key, name := p.TemplateID, p.TemplateName
+				if key == "" {
+					key, name = "pending", "pending"
+				} else if name == "" {
+					name = key
+				}
+				if byTemplate[key] == nil {
+					byTemplate[key] = &payoutTemplateTotal{TemplateID: key, TemplateName: name}
+				}
+				byTemplate[key].Count++
+				byTemplate[key].Cents += p.AmountCents
+			}
 		case !at.Before(previousStart):
 			resp.Window.PreviousCents += p.AmountCents
 		}
@@ -189,6 +218,15 @@ func buildPayoutHistory(payouts []Payout, days int, now time.Time) payoutHistory
 		pct := float64(resp.Window.TotalCents-resp.Window.PreviousCents) / float64(resp.Window.PreviousCents) * 100
 		resp.Window.ChangePct = &pct
 	}
+	for _, t := range byTemplate {
+		resp.ByTemplate = append(resp.ByTemplate, *t)
+	}
+	sort.Slice(resp.ByTemplate, func(i, j int) bool {
+		if resp.ByTemplate[i].Cents != resp.ByTemplate[j].Cents {
+			return resp.ByTemplate[i].Cents > resp.ByTemplate[j].Cents
+		}
+		return resp.ByTemplate[i].TemplateName < resp.ByTemplate[j].TemplateName
+	})
 
 	// Walk every day in the window, including the empty ones, accumulating as
 	// we go: a cumulative line must not jump over a payout-free stretch.

@@ -72,8 +72,13 @@ type Payout struct {
 	Status      string    `json:"status"`
 	Kind        string    `json:"kind"`        // "cash" | "credits"
 	Destination string    `json:"destination"` // "Bank ••8149", "Railway credits"
-	AccountID   string    `json:"-"`
-	SyncedAt    time.Time `json:"-"`
+	// TemplateID/TemplateName are filled in by attributePayouts once a credit
+	// payout has been matched to the template that earned it. Empty while the
+	// match is pending; "unknown" when the matcher gave up (see attribute.go).
+	TemplateID   string    `json:"templateId"`
+	TemplateName string    `json:"templateName"`
+	AccountID    string    `json:"-"`
+	SyncedAt     time.Time `json:"-"`
 }
 
 // autoWithdrawSettingsID is the fixed primary key of the singleton settings
@@ -117,6 +122,13 @@ func openDB(dsn string) *gorm.DB {
 	}
 	if err := db.AutoMigrate(&RailwayCredentials{}, &TemplateSnapshot{}, &AutoWithdrawSettings{}, &NotificationTarget{}, &Payout{}); err != nil {
 		log.Fatalf("migrate database: %v", err)
+	}
+	// Snapshots taken before templateMetrics was collected recorded the same
+	// lifetime figure as workspaceTemplates.totalPayout. Carry it into
+	// total_earnings so charts and payout attribution reach back through them.
+	if err := db.Exec(`UPDATE template_snapshots SET total_earnings = total_payout
+		WHERE total_earnings IS NULL AND status = 'PUBLISHED'`).Error; err != nil {
+		log.Fatalf("backfill legacy earnings: %v", err)
 	}
 	// Seed the singleton settings row so later saves are plain updates (GORM's
 	// Save does not insert a missing primary key).
