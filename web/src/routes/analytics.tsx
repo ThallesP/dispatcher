@@ -144,7 +144,8 @@ export default function Analytics() {
                   <th className="pb-2 font-medium">Template</th>
                   <th className="pb-2 pl-3 text-right font-medium">Projects</th>
                   <th className="pb-2 pl-3 text-right font-medium">Active</th>
-                  <th className="pb-2 pl-3 text-right font-medium">Health</th>
+                  <th className="pb-2 pl-3 text-right font-medium">Support health</th>
+                  <th className="pb-2 pl-3 text-right font-medium">Deploy health</th>
                   <th className="pb-2 pl-3 text-right font-medium">Payout</th>
                   <th className="pb-2 pl-3 text-right font-medium">Payout change</th>
                 </tr>
@@ -303,6 +304,9 @@ function TemplateRow({ template: t }: { template: TemplateAnalytics }) {
       <td className="py-2.5 pl-3 text-right tabular-nums">
         <SupportHealth template={t} />
       </td>
+      <td className="py-2.5 pl-3 text-right tabular-nums">
+        <TemplateHealth template={t} />
+      </td>
       <td className="whitespace-nowrap py-2.5 pl-3 text-right font-medium tabular-nums">
         {fmtUsd(t.totalPayout)}
       </td>
@@ -318,6 +322,26 @@ function TemplateRow({ template: t }: { template: TemplateAnalytics }) {
         {t.payoutChangePct != null ? fmtSignedPct(t.payoutChangePct) : "—"}
       </td>
     </tr>
+  );
+}
+
+// Deploy health from Railway (templateMetrics.templateHealth): the share of
+// recent deployments of the template that succeeded. Null means Railway has
+// not graded it (no recent deploys). It does not affect the kickback rate the
+// way support health does, but it is the first number to drop when a
+// template breaks, so it sits next to support health rather than replacing it.
+function TemplateHealth({ template: t }: { template: TemplateAnalytics }) {
+  if (t.health == null) return <span className="text-muted-foreground">—</span>;
+  const tone =
+    t.health >= 80
+      ? "text-(--viz-up)"
+      : t.health < 50
+        ? "text-(--viz-critical)"
+        : "";
+  return (
+    <span className={tone} title="Share of recent deployments of this template that succeeded">
+      {t.health.toFixed(0)}%
+    </span>
   );
 }
 
