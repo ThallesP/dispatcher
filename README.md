@@ -1,5 +1,9 @@
 # Dispatcher
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/dispatcher?utm_medium=integration&utm_source=button&utm_campaign=dispatcher)
+
+This repository is the source of the [Dispatcher template on Railway](https://railway.com/deploy/dispatcher).
+
 Go API + React Router SPA, shipped as a single binary.
 
 - `main.go` — wiring: env, database, routes, server.
