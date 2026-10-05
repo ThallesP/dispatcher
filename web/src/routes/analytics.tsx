@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { PayoutChart } from "~/components/payout-chart";
 import { PayoutHistory } from "~/components/payout-history";
+import { TemplateProjects } from "~/components/template-projects";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -133,8 +134,8 @@ export default function Analytics() {
             <CardTitle>Templates</CardTitle>
             <CardDescription>
               {comparedAgo
-                ? `Latest snapshot · payout change vs ${comparedAgo} ago`
-                : "Latest snapshot"}
+                ? `Latest snapshot · payout change vs ${comparedAgo} ago · select a template for its projects over time`
+                : "Latest snapshot · select a template for its projects over time"}
             </CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
@@ -287,37 +288,72 @@ function StatTile({
   );
 }
 
+// A row expands in place to chart that template's projects over time, so the
+// dashboard only grows a chart for the template you asked about. The whole row
+// is the hit target; the button inside it carries focus and aria-expanded.
 function TemplateRow({ template: t }: { template: TemplateAnalytics }) {
+  const [open, setOpen] = useState(false);
+  const panelId = `template-projects-${t.templateId}`;
   return (
-    <tr className="border-b border-border/50 last:border-0">
-      <td className="py-2.5 pr-4">
-        <div className="font-medium">{t.name}</div>
-        <div className="text-xs text-muted-foreground">{t.status.toLowerCase()}</div>
-      </td>
-      <td className="py-2.5 pl-3 text-right tabular-nums">
-        {fmtNum(t.projects)}
-      </td>
-      <td className="py-2.5 pl-3 text-right tabular-nums">
-        {fmtNum(t.activeProjects)}
-      </td>
-      <td className="py-2.5 pl-3 text-right tabular-nums">
-        <SupportHealth template={t} />
-      </td>
-      <td className="whitespace-nowrap py-2.5 pl-3 text-right font-medium tabular-nums">
-        {fmtUsd(t.totalPayout)}
-      </td>
-      <td
-        className={`py-2.5 pl-3 text-right tabular-nums ${
-          t.payoutChangePct == null
-            ? "text-muted-foreground"
-            : t.payoutChangePct >= 0
-              ? "text-(--viz-up)"
-              : "text-(--viz-down)"
+    <>
+      <tr
+        className={`cursor-pointer hover:bg-muted/50 ${
+          open ? "" : "border-b border-border/50 last:border-0"
         }`}
+        onClick={() => setOpen((o) => !o)}
       >
-        {t.payoutChangePct != null ? fmtSignedPct(t.payoutChangePct) : "—"}
-      </td>
-    </tr>
+        <td className="py-2.5 pr-4">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={panelId}
+            className="flex items-start gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronRight
+              className={`mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform ${
+                open ? "rotate-90" : ""
+              }`}
+            />
+            <span>
+              <span className="block font-medium">{t.name}</span>
+              <span className="block text-xs text-muted-foreground">
+                {t.status.toLowerCase()}
+              </span>
+            </span>
+          </button>
+        </td>
+        <td className="py-2.5 pl-3 text-right tabular-nums">
+          {fmtNum(t.projects)}
+        </td>
+        <td className="py-2.5 pl-3 text-right tabular-nums">
+          {fmtNum(t.activeProjects)}
+        </td>
+        <td className="py-2.5 pl-3 text-right tabular-nums">
+          <SupportHealth template={t} />
+        </td>
+        <td className="whitespace-nowrap py-2.5 pl-3 text-right font-medium tabular-nums">
+          {fmtUsd(t.totalPayout)}
+        </td>
+        <td
+          className={`py-2.5 pl-3 text-right tabular-nums ${
+            t.payoutChangePct == null
+              ? "text-muted-foreground"
+              : t.payoutChangePct >= 0
+                ? "text-(--viz-up)"
+                : "text-(--viz-down)"
+          }`}
+        >
+          {t.payoutChangePct != null ? fmtSignedPct(t.payoutChangePct) : "—"}
+        </td>
+      </tr>
+      {open && (
+        <tr id={panelId} className="border-b border-border/50 last:border-0">
+          <td colSpan={6} className="pb-6 pl-5.5 pt-2">
+            <TemplateProjects template={t} />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

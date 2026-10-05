@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -172,6 +173,27 @@ func parseCommand(args []string, stderr io.Writer) (command, error) {
 			path:         "/api/analytics/payout?days=" + strconv.Itoa(*days),
 			requiresAuth: true,
 		}, nil
+	case "projects":
+		projectFlags := flag.NewFlagSet("projects", flag.ContinueOnError)
+		projectFlags.SetOutput(stderr)
+		days := projectFlags.Int("days", 30, "history window in days (1-365)")
+		positional, err := parseInterspersed(projectFlags, args[1:])
+		if err != nil {
+			return command{}, err
+		}
+		if len(positional) != 1 {
+			return command{}, fmt.Errorf("projects requires exactly one template id or code")
+		}
+		if *days < 1 || *days > 365 {
+			return command{}, fmt.Errorf("days must be between 1 and 365")
+		}
+		return command{
+			method:       http.MethodGet,
+			path:         "/api/analytics/templates/" + url.PathEscape(positional[0]) + "/projects?days=" + strconv.Itoa(*days),
+			requiresAuth: true,
+		}, nil
+	case "raw":
+		return parseRawCommand(args[1:], stderr)
 	case "get":
 		if len(args) != 2 {
 			return command{}, fmt.Errorf("get requires exactly one API path")
@@ -186,6 +208,69 @@ func parseCommand(args []string, stderr io.Writer) (command, error) {
 		return command{method: http.MethodGet, path: path, requiresAuth: true}, nil
 	default:
 		return command{}, fmt.Errorf("unknown command %q (run dispatcherctl help)", args[0])
+	}
+}
+
+// rawDatasets maps the datasets `raw` accepts to their endpoints.
+var rawDatasets = map[string]string{
+	"snapshots": "/api/raw/snapshots",
+	"payouts":   "/api/raw/payouts",
+}
+
+// parseRawCommand builds a raw query. Values are passed through as given and
+// validated by Dispatcher, so the CLI and server cannot drift on the limits.
+func parseRawCommand(args []string, stderr io.Writer) (command, error) {
+	rawFlags := flag.NewFlagSet("raw", flag.ContinueOnError)
+	rawFlags.SetOutput(stderr)
+	template := rawFlags.String("template", "", "template id or code (snapshots only)")
+	days := rawFlags.String("days", "", "only rows from the last N days")
+	since := rawFlags.String("since", "", "only rows at or after this RFC 3339 time or YYYY-MM-DD date")
+	until := rawFlags.String("until", "", "only rows before this RFC 3339 time or YYYY-MM-DD date")
+	limit := rawFlags.String("limit", "", "maximum rows, newest first (default 1000)")
+	positional, err := parseInterspersed(rawFlags, args)
+	if err != nil {
+		return command{}, err
+	}
+	if len(positional) != 1 {
+		return command{}, fmt.Errorf("raw requires one dataset: snapshots or payouts")
+	}
+	path, ok := rawDatasets[positional[0]]
+	if !ok {
+		return command{}, fmt.Errorf("unknown raw dataset %q (want snapshots or payouts)", positional[0])
+	}
+	if *template != "" && positional[0] != "snapshots" {
+		return command{}, fmt.Errorf("--template only applies to snapshots")
+	}
+
+	query := url.Values{}
+	for name, value := range map[string]string{
+		"template": *template, "days": *days, "since": *since, "until": *until, "limit": *limit,
+	} {
+		if value != "" {
+			query.Set(name, value)
+		}
+	}
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	return command{method: http.MethodGet, path: path, requiresAuth: true}, nil
+}
+
+// parseInterspersed lets positional arguments sit among the flags, so
+// "projects my-template --days 7" works as well as "projects --days 7
+// my-template"; the flag package alone stops at the first positional.
+func parseInterspersed(flags *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for {
+		if err := flags.Parse(args); err != nil {
+			return nil, err
+		}
+		args = flags.Args()
+		if len(args) == 0 {
+			return positional, nil
+		}
+		positional = append(positional, args[0])
+		args = args[1:]
 	}
 }
 
@@ -239,10 +324,21 @@ Query commands:
   summary                  Show the latest analytics totals
   templates                List current template analytics
   payouts [--days N]       Show payout history (default: 30 days)
+  projects TEMPLATE [--days N]
+                           Show a template's total, recent and active projects
+                           over time (TEMPLATE is its id or code; default: 30 days)
   notifications            List notification targets
   withdraw-settings        Show auto-withdraw settings
   withdraw-accounts        List payout destinations and balance
   get PATH                 GET any authenticated API path
+
+Raw data:
+  raw snapshots [filters]  Every collected template snapshot, all columns
+  raw payouts [filters]    Every mirrored payout
+    --template ID|CODE     Only this template (snapshots only)
+    --days N               Only rows from the last N days
+    --since T, --until T   Window bounds, RFC 3339 or YYYY-MM-DD
+    --limit N              Maximum rows, newest first (default: 1000, max: 10000)
 
 Other commands:
   login                    Authenticate through Dispatcher and Railway OAuth
