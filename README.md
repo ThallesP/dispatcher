@@ -95,6 +95,7 @@ make build-cli
 ./dispatcherctl summary
 ./dispatcherctl templates
 ./dispatcherctl payouts --days 90
+./dispatcherctl projects umami-analytics --days 90   # a template's id or code
 ./dispatcherctl notifications
 ./dispatcherctl withdraw-settings
 ./dispatcherctl withdraw-accounts
@@ -125,6 +126,24 @@ new read endpoints without waiting for a CLI release:
 ```sh
 ./dispatcherctl --compact get analytics/templates
 ```
+
+The dashboard endpoints are shaped for charts: latest values, top-five folds,
+the most recent payouts. When an agent needs something they do not cover,
+`raw` returns the rows Dispatcher has collected, with every column and no
+aggregation, newest first:
+
+```sh
+./dispatcherctl raw snapshots --template umami-analytics --days 30
+./dispatcherctl raw snapshots --since 2026-09-01 --until 2026-09-08 --limit 5000
+./dispatcherctl raw payouts
+```
+
+`snapshots` is the hourly template history (projects, earnings, health, support
+health, and the rest of what Railway reports), and `payouts` is every mirrored
+withdrawal. `--days` or `--since`/`--until` bound the window, and `--limit` caps
+the rows (default 1000, max 10000). A response with `"truncated": true` matched
+more rows than the limit allowed, so narrow the window to reach older rows.
+Only collected data is exposed, never credentials.
 
 Run `dispatcherctl help` for the full command list. A remote Dispatcher URL must
 use HTTPS for login; plain HTTP is accepted only for loopback development. Set

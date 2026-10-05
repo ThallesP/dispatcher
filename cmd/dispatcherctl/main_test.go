@@ -281,3 +281,52 @@ func TestRunSavesSessionRotatedByDispatcher(t *testing.T) {
 		t.Fatalf("stored session expires at %s", session.ExpiresAt)
 	}
 }
+
+func TestParseCommandProjects(t *testing.T) {
+	for _, args := range [][]string{
+		{"projects", "my template", "--days", "7"},
+		{"projects", "--days", "7", "my template"},
+	} {
+		cmd, err := parseCommand(args, &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("parseCommand(%q): %v", args, err)
+		}
+		if want := "/api/analytics/templates/my%20template/projects?days=7"; cmd.path != want || !cmd.requiresAuth {
+			t.Fatalf("parseCommand(%q) = %+v, want path %s", args, cmd, want)
+		}
+	}
+	for _, args := range [][]string{
+		{"projects"},
+		{"projects", "a", "b"},
+		{"projects", "a", "--days", "366"},
+	} {
+		if _, err := parseCommand(args, &bytes.Buffer{}); err == nil {
+			t.Errorf("parseCommand(%q) accepted invalid arguments", args)
+		}
+	}
+}
+
+func TestParseCommandRaw(t *testing.T) {
+	cmd, err := parseCommand([]string{"raw", "snapshots", "--template", "dispatcher", "--since", "2026-09-01", "--limit", "50"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/api/raw/snapshots?limit=50&since=2026-09-01&template=dispatcher"; cmd.path != want || !cmd.requiresAuth {
+		t.Fatalf("cmd = %+v, want path %s", cmd, want)
+	}
+
+	cmd, err = parseCommand([]string{"raw", "payouts"}, &bytes.Buffer{})
+	if err != nil || cmd.path != "/api/raw/payouts" {
+		t.Fatalf("cmd = %+v, err = %v", cmd, err)
+	}
+
+	for _, args := range [][]string{
+		{"raw"},
+		{"raw", "credentials"},
+		{"raw", "payouts", "--template", "dispatcher"},
+	} {
+		if _, err := parseCommand(args, &bytes.Buffer{}); err == nil {
+			t.Errorf("parseCommand(%q) accepted invalid arguments", args)
+		}
+	}
+}

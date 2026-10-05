@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,4 +122,90 @@ func TestAnalyticsTotalsUseAuthoritativeTemplateMetrics(t *testing.T) {
 	if got.Projects != 20 || got.ActiveProjects != 8 || got.RecentProjects != 5 || got.TotalPayout != 125.50 {
 		t.Fatalf("totals = %+v", got)
 	}
+}
+
+func TestTemplateProjectsChartsOneTemplateFromAuthoritativeMetrics(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Truncate(time.Hour)
+	day := 24 * time.Hour
+	sample := func(id, code string, at time.Time, total, recent, active int64) TemplateSnapshot {
+		return TemplateSnapshot{
+			SampledAt: at, TemplateID: id, Name: "Template " + id, Code: code, Status: "PUBLISHED",
+			TotalDeployments: pointerTo(total), DeploymentsLast90Days: pointerTo(recent),
+			ActiveDeployments: pointerTo(active), TotalEarnings: pointerTo(1.0),
+		}
+	}
+	rows := []TemplateSnapshot{
+		sample("tpl-a", "old-code", now.Add(-40*day), 1, 1, 1), // outside the 30d window
+		sample("tpl-a", "old-code", now.Add(-20*day), 100, 40, 20),
+		// Legacy rows carry values from the old resolver and must not chart.
+		{SampledAt: now.Add(-10 * day), TemplateID: "tpl-a", Code: "old-code", Projects: 999, ActiveProjects: 999},
+		sample("tpl-a", "new-code", now.Add(-1*day), 150, 30, 25),
+		sample("tpl-b", "other", now.Add(-1*day), 7, 7, 7),
+	}
+	if err := gorm.G[TemplateSnapshot](db).CreateInBatches(t.Context(), &rows, 100); err != nil {
+		t.Fatal(err)
+	}
+
+	// A template still answers to the code it was renamed from, and is
+	// described by its latest snapshot.
+	res := serveTemplateProjects(t, db, "old-code", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", res.Code, res.Body)
+	}
+	var got templateProjectsResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.TemplateID != "tpl-a" || got.Code != "new-code" || got.Days != 30 {
+		t.Fatalf("template = %+v, days = %d", got.templateRef, got.Days)
+	}
+	if len(got.Points) != 2 || got.Points[0].Projects != 100 || got.Points[1].Projects != 150 {
+		t.Fatalf("points = %+v", got.Points)
+	}
+	c := got.Change
+	if c == nil || c.Projects.Current != 150 || *c.Projects.Previous != 100 || *c.Projects.ChangePct != 50 {
+		t.Fatalf("projects change = %+v", c)
+	}
+	if c.RecentProjects.Current != 30 || *c.RecentProjects.ChangePct != -25 {
+		t.Fatalf("recent change = %+v", c.RecentProjects)
+	}
+
+	if res := serveTemplateProjects(t, db, "tpl-a", "days=90"); !strings.Contains(res.Body.String(), `"projects":1,`) {
+		t.Fatalf("90d window should include the 40-day-old sample: %s", res.Body)
+	}
+	if res := serveTemplateProjects(t, db, "missing", ""); res.Code != http.StatusNotFound {
+		t.Fatalf("unknown template status = %d", res.Code)
+	}
+}
+
+func TestBuildProjectChangesWithoutBaseline(t *testing.T) {
+	if got := buildProjectChanges(nil); got != nil {
+		t.Fatalf("no samples should mean no change, got %+v", got)
+	}
+	got := buildProjectChanges([]projectPoint{{Projects: 5, RecentProjects: 3, ActiveProjects: 1}})
+	if got.Projects.Current != 5 || got.Projects.Previous != nil || got.Projects.ChangePct != nil {
+		t.Fatalf("a single sample has no baseline: %+v", got.Projects)
+	}
+}
+
+func openTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(duckdb.Open(filepath.Join(t.TempDir(), "test.duckdb")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&TemplateSnapshot{}, &Payout{}); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func serveTemplateProjects(t *testing.T, db *gorm.DB, template, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/analytics/templates/"+template+"/projects?"+query, nil)
+	req.SetPathValue("template", template)
+	res := httptest.NewRecorder()
+	handleTemplateProjects(db)(res, req)
+	return res
 }

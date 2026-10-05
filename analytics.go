@@ -259,6 +259,121 @@ func handleTemplateAnalytics(db *gorm.DB) http.HandlerFunc {
 	}
 }
 
+type templateRef struct {
+	TemplateID string `json:"templateId"`
+	Name       string `json:"name"`
+	Code       string `json:"code"`
+	Status     string `json:"status"`
+}
+
+// resolveTemplate finds a template by id or by code (the slug in its
+// railway.com/deploy URL) and describes it as of its latest snapshot, so a
+// template still answers to a code it has since been renamed from. ok is false
+// when no snapshot matches.
+func resolveTemplate(ctx context.Context, db *gorm.DB, ref string) (t templateRef, ok bool, err error) {
+	res := db.WithContext(ctx).Raw(`
+		SELECT template_id, name, code, status
+		FROM template_snapshots
+		WHERE template_id = (
+			SELECT template_id FROM template_snapshots
+			WHERE template_id = ? OR (code = ? AND code <> '')
+			ORDER BY sampled_at DESC
+			LIMIT 1)
+		ORDER BY sampled_at DESC, id DESC
+		LIMIT 1`, ref, ref).Scan(&t)
+	return t, res.RowsAffected > 0, res.Error
+}
+
+type projectPoint struct {
+	SampledAt      time.Time `json:"sampledAt"`
+	Projects       int64     `json:"projects"`
+	RecentProjects int64     `json:"recentProjects"`
+	ActiveProjects int64     `json:"activeProjects"`
+}
+
+// projectChanges compares the newest sample in the window with the oldest,
+// so the change reads "since the start of the selected range".
+type projectChanges struct {
+	Projects       metricChange `json:"projects"`
+	RecentProjects metricChange `json:"recentProjects"`
+	ActiveProjects metricChange `json:"activeProjects"`
+}
+
+type templateProjectsResponse struct {
+	templateRef
+	Days int `json:"days"`
+	// Change is null while the window holds no samples.
+	Change *projectChanges `json:"change"`
+	Points []projectPoint  `json:"points"`
+}
+
+// handleTemplateProjects returns one template's total, recent (last 90 days)
+// and active project counts over time. The path takes the template's id or
+// code; ?days=N bounds the window (default 30).
+func handleTemplateProjects(db *gorm.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		days := 30
+		if v, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && v >= 1 && v <= 365 {
+			days = v
+		}
+		template, ok, err := resolveTemplate(r.Context(), db, r.PathValue("template"))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "template not found"})
+			return
+		}
+
+		// Legacy rows hold values from the old, incorrect resolver, so only
+		// samples with authoritative templateMetrics are charted.
+		points := []projectPoint{}
+		err = db.WithContext(r.Context()).Raw(`
+			SELECT sampled_at,
+			       total_deployments AS projects,
+			       deployments_last90_days AS recent_projects,
+			       active_deployments AS active_projects
+			FROM template_snapshots
+			WHERE template_id = ? AND sampled_at >= ? AND total_deployments IS NOT NULL
+			ORDER BY sampled_at`, template.TemplateID, time.Now().UTC().AddDate(0, 0, -days)).Scan(&points).Error
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, templateProjectsResponse{
+			templateRef: template,
+			Days:        days,
+			Change:      buildProjectChanges(points),
+			Points:      points,
+		})
+	}
+}
+
+func buildProjectChanges(points []projectPoint) *projectChanges {
+	if len(points) == 0 {
+		return nil
+	}
+	totals := func(p projectPoint) snapshotTotals {
+		return snapshotTotals{
+			Projects:       float64(p.Projects),
+			RecentProjects: float64(p.RecentProjects),
+			ActiveProjects: float64(p.ActiveProjects),
+		}
+	}
+	current := totals(points[len(points)-1])
+	var first *snapshotTotals
+	if len(points) > 1 {
+		t := totals(points[0])
+		first = &t
+	}
+	return &projectChanges{
+		Projects:       changeOf(current.Projects, first, func(t snapshotTotals) float64 { return t.Projects }),
+		RecentProjects: changeOf(current.RecentProjects, first, func(t snapshotTotals) float64 { return t.RecentProjects }),
+		ActiveProjects: changeOf(current.ActiveProjects, first, func(t snapshotTotals) float64 { return t.ActiveProjects }),
+	}
+}
+
 // comparisonTimestamps picks the latest sample and the sample to compare it
 // against: the newest one at least 7 days older, falling back to the oldest
 // available so young deployments still get a delta. latest is nil while the
