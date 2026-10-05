@@ -214,6 +214,38 @@ func login(ctx context.Context, client *apiClient, credentialsPath string, outpu
 	}
 }
 
+// loginWithToken redeems a one-time token minted from the Dispatcher
+// dashboard. The browser already went through Railway's consent when the
+// token was minted, so there is nothing to open or poll.
+func loginWithToken(ctx context.Context, client *apiClient, credentialsPath, token string, output io.Writer) error {
+	if err := requireSecureLoginURL(client.baseURL); err != nil {
+		return err
+	}
+	if !validEncodedSecret(token) {
+		return errors.New("invalid login token; copy the command from the dashboard again")
+	}
+	payload, err := json.Marshal(map[string]string{"token": token})
+	if err != nil {
+		return err
+	}
+	body, err := client.requestBody(ctx, http.MethodPost, "/api/auth/cli/redeem", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return err
+	}
+	var session storedSession
+	if err := json.Unmarshal(body, &session); err != nil {
+		return fmt.Errorf("decode login response: %w", err)
+	}
+	if session.Session == "" || !session.ExpiresAt.After(time.Now()) {
+		return errors.New("Dispatcher returned an invalid session")
+	}
+	if err := saveStoredSession(credentialsPath, client.baseURL, session); err != nil {
+		return err
+	}
+	fmt.Fprintf(output, "Logged in to %s.\n", client.baseURL)
+	return nil
+}
+
 func requireSecureLoginURL(instance string) error {
 	u, err := url.Parse(instance)
 	if err != nil {

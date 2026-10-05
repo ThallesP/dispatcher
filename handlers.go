@@ -50,7 +50,11 @@ func handleAuthCallback(db *gorm.DB) http.HandlerFunc {
 			return
 		}
 		var cliState *cliOAuthState
-		if stateValue := q.Get("state"); strings.HasPrefix(stateValue, cliOAuthStatePrefix) {
+		stateValue := q.Get("state")
+		// issueCLI marks a round trip the dashboard started to mint a CLI
+		// login; it is a browser flow, so it shares the state-cookie check.
+		issueCLI := false
+		if strings.HasPrefix(stateValue, cliOAuthStatePrefix) {
 			state, err := decodeCLIState(creds.ClientSecret, stateValue, time.Now())
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or expired CLI auth state"})
@@ -60,6 +64,8 @@ func handleAuthCallback(db *gorm.DB) http.HandlerFunc {
 		} else if err := validateBrowserOAuthState(w, r); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
+		} else {
+			issueCLI = strings.HasPrefix(stateValue, cliIssueStatePrefix)
 		}
 		if oauthErr := q.Get("error"); oauthErr != "" {
 			message := q.Get("error_description")
@@ -85,6 +91,18 @@ func handleAuthCallback(db *gorm.DB) http.HandlerFunc {
 			})
 			return
 		}
+		if issueCLI {
+			// The fresh grant belongs to the CLI alone: Railway rotates refresh
+			// tokens, so the browser keeps its own session untouched.
+			token, expiresAt, err := cliAuthHandoffs.issue(value, now.Add(sessionCookieMaxAge), now)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			setCLILoginTokenCookie(w, token, expiresAt)
+			http.Redirect(w, r, "/?cli=ready", http.StatusFound)
+			return
+		}
 		if cliState != nil {
 			// The grant refreshes itself, so the CLI only has to stop trusting
 			// the session once the cookie it was handed would have aged out.
@@ -102,17 +120,31 @@ func handleAuthCallback(db *gorm.DB) http.HandlerFunc {
 }
 
 func handleAuthRedirect(db *gorm.DB) http.HandlerFunc {
+	return startBrowserOAuth(db, "")
+}
+
+// handleCLIIssueRedirect starts the round trip behind the dashboard's
+// "Generate login command": a Railway consent that mints a grant for the CLI,
+// which the callback parks behind a one-time token.
+func handleCLIIssueRedirect(db *gorm.DB) http.HandlerFunc {
+	return startBrowserOAuth(db, cliIssueStatePrefix)
+}
+
+// startBrowserOAuth sends the browser to Railway with a state bound to a
+// cookie. statePrefix tells the callback what the round trip is for.
+func startBrowserOAuth(db *gorm.DB, statePrefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		creds, err := loadOrCreateRailwayCredentials(r.Context(), db)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
-		state, err := randomURLToken(32)
+		token, err := randomURLToken(32)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not start Railway login"})
 			return
 		}
+		state := statePrefix + token
 		setBrowserOAuthStateCookie(w, state, int(browserOAuthStateTTL/time.Second))
 		http.Redirect(w, r, railwayAuthorizationURL(creds, state), http.StatusFound)
 	}
