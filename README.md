@@ -119,6 +119,24 @@ works when the CLI and browser are on different machines. Sessions are stored
 with owner-only permissions in the operating system's user config directory.
 Use `dispatcherctl logout` to remove the session for an instance.
 
+The dashboard's **CLI** button walks through the same setup from the other
+side. **Generate login command** sends the browser through Railway's consent
+screen and comes back with a ready-made command:
+
+```sh
+dispatcherctl --url https://your-dispatcher.up.railway.app login --token …
+```
+
+Running it logs the CLI in with nothing to open or poll. The consent mints a
+fresh grant for the CLI rather than copying the browser's. Railway rotates
+refresh tokens and rejects a rotated one, so two clients sharing one grant
+would log each other out. Dispatcher parks that grant behind a random token
+that is single use and expires after ten minutes. The token reaches the
+dashboard in an `HttpOnly` cookie scoped to the pickup endpoint, so it never
+appears in a URL, browser history, or logs. The dashboard masks it on screen,
+which keeps it safe to screen-share, and only the copy button carries it. A
+command left in shell history is dead once it has run.
+
 Responses are JSON and are pretty-printed by default. Pass `--compact` before
 the command for machine-friendly JSONL output. `get` makes it possible to query
 new read endpoints without waiting for a CLI release:

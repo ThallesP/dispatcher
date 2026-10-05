@@ -62,9 +62,19 @@ func runWithBrowser(args []string, getenv func(string) string, stdin io.Reader, 
 		fmt.Fprintln(stderr, "error: timeout must be greater than zero")
 		return 2
 	}
-	if rest[0] == "login" && len(rest) != 1 {
-		fmt.Fprintln(stderr, "error: login takes no arguments")
-		return 2
+	var loginToken string
+	if rest[0] == "login" {
+		loginFlags := flag.NewFlagSet("login", flag.ContinueOnError)
+		loginFlags.SetOutput(stderr)
+		token := loginFlags.String("token", "", "one-time login token from the Dispatcher dashboard")
+		if err := loginFlags.Parse(rest[1:]); err != nil {
+			return 2
+		}
+		if loginFlags.NArg() != 0 {
+			fmt.Fprintln(stderr, "error: login takes no positional arguments")
+			return 2
+		}
+		loginToken = *token
 	}
 	if rest[0] == "logout" && len(rest) != 1 {
 		fmt.Fprintln(stderr, "error: logout takes no arguments")
@@ -89,7 +99,12 @@ func runWithBrowser(args []string, getenv func(string) string, stdin io.Reader, 
 	if rest[0] == "login" {
 		ctx, cancel := context.WithTimeout(context.Background(), loginTimeout)
 		defer cancel()
-		if err := login(ctx, client, credentialsPath, stdout, openURL); err != nil {
+		if loginToken != "" {
+			err = loginWithToken(ctx, client, credentialsPath, loginToken, stdout)
+		} else {
+			err = login(ctx, client, credentialsPath, stdout, openURL)
+		}
+		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}
@@ -341,7 +356,8 @@ Raw data:
     --limit N              Maximum rows, newest first (default: 1000, max: 10000)
 
 Other commands:
-  login                    Authenticate through Dispatcher and Railway OAuth
+  login [--token T]        Authenticate through Dispatcher and Railway OAuth, or
+                           with a one-time token from the dashboard's CLI button
   logout                   Remove the saved session for this instance
   refresh                  Collect a fresh analytics snapshot
   version                  Print the CLI version

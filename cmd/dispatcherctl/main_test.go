@@ -330,3 +330,60 @@ func TestParseCommandRaw(t *testing.T) {
 		}
 	}
 }
+
+func TestRunLoginWithTokenRedeemsWithoutABrowser(t *testing.T) {
+	token, err := randomSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/auth/cli/redeem" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token != token {
+			t.Errorf("redeem body = %+v, %v", body, err)
+		}
+		_ = json.NewEncoder(w).Encode(storedSession{Session: "minted-session", ExpiresAt: expiresAt})
+	}))
+	defer server.Close()
+
+	credentialsPath := t.TempDir() + "/credentials.json"
+	var stdout, stderr bytes.Buffer
+	code := runWithBrowser(
+		[]string{"--config", credentialsPath, "--url", server.URL, "login", "--token", token},
+		func(string) string { return "" },
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		func(string) error { t.Error("token login must not open a browser"); return nil },
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	session, ok, err := loadStoredSession(credentialsPath, server.URL, time.Now())
+	if err != nil || !ok || session.Session != "minted-session" {
+		t.Fatalf("stored session = %+v, ok = %t, err = %v", session, ok, err)
+	}
+	if storedURL, ok, _ := loadStoredURL(credentialsPath); !ok || storedURL != server.URL {
+		t.Fatalf("stored URL = %q, want the instance saved as the default", storedURL)
+	}
+}
+
+func TestRunLoginRejectsMalformedToken(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--config", t.TempDir() + "/credentials.json", "--url", "https://dispatcher.example", "login", "--token", "nope"},
+		func(string) string { return "" },
+		&stdout,
+		&stderr,
+	)
+	if code != 1 || !strings.Contains(stderr.String(), "invalid login token") {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+}

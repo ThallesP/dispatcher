@@ -347,3 +347,159 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
+
+func TestCLIIssueRedirectMarksTheBrowserState(t *testing.T) {
+	db := cliAuthTestDB(t, "cli-issue-redirect.duckdb")
+	t.Setenv("CALLBACK_URL", "https://dispatcher.example/api/auth/callback")
+	res := httptest.NewRecorder()
+
+	handleCLIIssueRedirect(db).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/auth/cli/issue", nil))
+
+	if res.Code != http.StatusFound {
+		t.Fatalf("status = %d, body = %s", res.Code, res.Body.String())
+	}
+	authorizationURL, err := url.Parse(res.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := authorizationURL.Query().Get("state")
+	if !strings.HasPrefix(state, cliIssueStatePrefix) || !validCLISecret(strings.TrimPrefix(state, cliIssueStatePrefix)) {
+		t.Fatalf("state = %q, want an issue-prefixed secret", state)
+	}
+	if authorizationURL.Query().Get("prompt") != "consent" {
+		t.Fatal("a CLI grant needs prompt=consent to come with a refresh token")
+	}
+	cookie := findCookie(res.Result().Cookies(), browserOAuthStateCookie)
+	if cookie == nil || cookie.Value != state {
+		t.Fatalf("state cookie = %+v, want it bound to %q", cookie, state)
+	}
+}
+
+func TestCLIIssueCallbackParksAFreshGrantBehindASingleUseToken(t *testing.T) {
+	db := cliAuthTestDB(t, "cli-issue-callback.duckdb")
+	t.Setenv("CALLBACK_URL", "https://dispatcher.example/api/auth/callback")
+	t.Setenv("RAILWAY_PROJECT_ID", "project-1")
+	oldClient := client
+	client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body string
+		switch req.URL.String() {
+		case railwayTokenURL:
+			body = `{"access_token":"cli-grant","refresh_token":"cli-refresh","expires_in":3600}`
+		case railwayGraphQLURL:
+			body = `{"data":{"project":{"workspaceId":"workspace-1"},"me":{"id":"user-1","workspaces":[{"id":"workspace-1"}]}}}`
+		default:
+			t.Errorf("unexpected request to %s", req.URL)
+			return testHTTPResponse(req, http.StatusNotFound, `{}`), nil
+		}
+		return testHTTPResponse(req, http.StatusOK, body), nil
+	})}
+	defer func() { client = oldClient }()
+	cliAuthHandoffs = cliAuthHandoffStore{entries: make(map[string]cliAuthHandoff)}
+
+	state := cliIssueStatePrefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{6}, 32))
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?"+url.Values{
+		"code":  {"railway-code"},
+		"state": {state},
+	}.Encode(), nil)
+	req.AddCookie(&http.Cookie{Name: browserOAuthStateCookie, Value: state})
+	res := httptest.NewRecorder()
+
+	handleAuthCallback(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusFound || res.Header().Get("Location") != "/?cli=ready" {
+		t.Fatalf("callback: status = %d, location = %q, body = %s", res.Code, res.Header().Get("Location"), res.Body.String())
+	}
+	cookies := res.Result().Cookies()
+	// Railway rotates refresh tokens, so the browser must keep its own grant.
+	if findCookie(cookies, authCookieName) != nil {
+		t.Fatal("minting a CLI login replaced the browser's session")
+	}
+	tokenCookie := findCookie(cookies, cliLoginTokenCookie)
+	if tokenCookie == nil || !validCLISecret(tokenCookie.Value) || tokenCookie.Path != cliLoginPickupPath ||
+		!tokenCookie.HttpOnly || !tokenCookie.Secure || tokenCookie.MaxAge <= 0 {
+		t.Fatalf("token cookie = %+v", tokenCookie)
+	}
+
+	// The dashboard picks the token up once; the cookie is cleared with it.
+	pickupReq := httptest.NewRequest(http.MethodPost, cliLoginPickupPath, nil)
+	pickupReq.AddCookie(tokenCookie)
+	pickup := httptest.NewRecorder()
+	handleCLILoginPickup(pickup, pickupReq)
+	var picked struct {
+		Token     string    `json:"token"`
+		ExpiresAt time.Time `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(pickup.Body.Bytes(), &picked); err != nil || pickup.Code != http.StatusOK {
+		t.Fatalf("pickup: status = %d, body = %s", pickup.Code, pickup.Body.String())
+	}
+	if picked.Token != tokenCookie.Value || !picked.ExpiresAt.After(time.Now()) {
+		t.Fatalf("picked = %+v", picked)
+	}
+	if cleared := findCookie(pickup.Result().Cookies(), cliLoginTokenCookie); cleared == nil || cleared.MaxAge >= 0 {
+		t.Fatalf("pickup did not clear the token cookie: %+v", cleared)
+	}
+
+	redeem := func() *httptest.ResponseRecorder {
+		res := httptest.NewRecorder()
+		body := strings.NewReader(`{"token":"` + picked.Token + `"}`)
+		handleCLILoginRedeem(res, httptest.NewRequest(http.MethodPost, "/api/auth/cli/redeem", body))
+		return res
+	}
+	first := redeem()
+	var redeemed storedSessionResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &redeemed); err != nil || first.Code != http.StatusOK {
+		t.Fatalf("redeem: status = %d, body = %s", first.Code, first.Body.String())
+	}
+	decoded, err := decodeSession("client-secret", redeemed.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.AccessToken != "cli-grant" || decoded.RefreshToken != "cli-refresh" {
+		t.Fatalf("session = %+v", decoded)
+	}
+	if again := redeem(); again.Code != http.StatusUnauthorized {
+		t.Fatalf("second redeem: status = %d, want the token to be single use", again.Code)
+	}
+}
+
+func TestCLIRedeemOnlyAcceptsDashboardMintedTokens(t *testing.T) {
+	store := cliAuthHandoffStore{entries: make(map[string]cliAuthHandoff)}
+	now := time.Now()
+
+	// A polling-flow code is released only against its verifier.
+	verifier := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	code, _, err := store.start(cliLoginChallenge(verifier), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.complete(code, "session", now.Add(time.Hour), "", now)
+	if _, ok := store.redeem(code, now); ok {
+		t.Fatal("redeem released a polling-flow login without its verifier")
+	}
+
+	// And a minted token cannot be pulled through exchange.
+	token, _, err := store.issue("session", now.Add(time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, status := store.exchange(token, verifier, now); status != cliHandoffInvalid {
+		t.Fatalf("exchange status = %d for a minted token", status)
+	}
+	if _, ok := store.redeem(token, now.Add(cliOAuthStateTTL+time.Second)); ok {
+		t.Fatal("redeem accepted an expired token")
+	}
+}
+
+type storedSessionResponse struct {
+	Session   string    `json:"session"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
+}

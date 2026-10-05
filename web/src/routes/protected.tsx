@@ -1,6 +1,7 @@
 import { ChevronDown, LogOut, RefreshCw, TrainFront } from "lucide-react";
 import { Link, Outlet, useRevalidator } from "react-router";
 import { AutoWithdraw } from "~/components/auto-withdraw-dialog";
+import { CliDialog } from "~/components/cli-dialog";
 import { NotificationsDialog } from "~/components/notifications-dialog";
 import { Button } from "~/components/ui/button";
 import {
@@ -96,6 +97,7 @@ function Header({ user }: { user: User }) {
           <RefreshButton />
           <NotificationsDialog />
           <AutoWithdraw />
+          <CliDialog />
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="ghost" size="sm" />}>
               {user.avatar && (
