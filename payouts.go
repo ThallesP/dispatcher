@@ -22,9 +22,6 @@ const (
 	// dayKeyLayout is both the daily bucket key and the wire format for a
 	// point on the chart.
 	dayKeyLayout = "2006-01-02"
-	// recentPayoutRows caps the payout table. The chart carries the shape of
-	// the history, so the table only has to show what happened lately.
-	recentPayoutRows = 8
 	// defaultPayoutWindowDays matches the analytics chart's default range.
 	defaultPayoutWindowDays = 30
 	maxPayoutWindowDays     = 365
@@ -82,8 +79,8 @@ type payoutHistoryResponse struct {
 	Points []payoutPoint `json:"points"`
 	Window payoutWindow  `json:"window"`
 	Totals payoutTotals  `json:"totals"`
-	// Payouts is the most recent recentPayoutRows rows, newest first, and
-	// TotalRows how many exist in all — so the table can say what it is hiding.
+	// Payouts is every row in the selected window, newest first, and TotalRows
+	// how many exist in all — so the table can say what lies outside the window.
 	Payouts   []Payout `json:"payouts"`
 	TotalRows int      `json:"totalRows"`
 }
@@ -113,7 +110,7 @@ func handlePayoutHistory(db *gorm.DB) http.HandlerFunc {
 
 // buildPayoutHistory turns the stored payouts into the windowed cumulative
 // series, the window/previous-window comparison, lifetime totals and the
-// recent rows the table shows.
+// rows the table shows.
 func buildPayoutHistory(payouts []Payout, days int, now time.Time) payoutHistoryResponse {
 	resp := payoutHistoryResponse{
 		Points:    []payoutPoint{},
@@ -122,23 +119,24 @@ func buildPayoutHistory(payouts []Payout, days int, now time.Time) payoutHistory
 		TotalRows: len(payouts),
 	}
 
-	// Newest first for the table. The SQL already orders this way, but the
-	// pure function must not depend on its caller for correctness.
-	sorted := slices.Clone(payouts)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].CreatedAt.After(sorted[j].CreatedAt) })
-	for i, p := range sorted {
-		if i >= recentPayoutRows {
-			break
-		}
-		p.CreatedAt = p.CreatedAt.UTC()
-		resp.Payouts = append(resp.Payouts, p)
-	}
-
 	// The window is the last N whole UTC days including today, so the axis
 	// lines up with the daily buckets rather than a ragged clock time.
 	today := now.UTC().Truncate(24 * time.Hour)
 	windowStart := today.AddDate(0, 0, -(days - 1))
 	previousStart := windowStart.AddDate(0, 0, -days)
+
+	// Newest first for the table, which lists the whole window: the range
+	// picker scopes the chart, so it scopes the rows too. The SQL already
+	// orders this way, but the pure function must not depend on its caller.
+	sorted := slices.Clone(payouts)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].CreatedAt.After(sorted[j].CreatedAt) })
+	for _, p := range sorted {
+		if p.CreatedAt.UTC().Before(windowStart) {
+			continue
+		}
+		p.CreatedAt = p.CreatedAt.UTC()
+		resp.Payouts = append(resp.Payouts, p)
+	}
 
 	perDayCash := map[string]int64{}
 	perDayCredits := map[string]int64{}
