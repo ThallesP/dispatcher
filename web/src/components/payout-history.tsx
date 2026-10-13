@@ -19,7 +19,11 @@ import {
 } from "~/components/ui/card";
 import { Skeleton } from "~/components/ui/skeleton";
 import { fmtCents, fmtNum, fmtSignedPct } from "~/lib/format";
-import { type Payout, payoutHistoryQuery } from "~/queries/payouts";
+import {
+  type Payout,
+  PSEUDO_TEMPLATE_IDS,
+  payoutHistoryQuery,
+} from "~/queries/payouts";
 
 const dayFmt = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -119,6 +123,40 @@ export function PayoutHistory() {
             )}
           </CardContent>
 
+          {data.byTemplate.length > 0 && (
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <caption className="pb-2 text-left text-xs text-muted-foreground">
+                  Credit payouts by template, last {days} days
+                </caption>
+                <thead>
+                  <tr className="border-b text-left text-xs text-muted-foreground">
+                    <th className="pb-2 font-medium">Template</th>
+                    <th className="pb-2 pl-3 text-right font-medium">Payouts</th>
+                    <th className="pb-2 pl-3 text-right font-medium">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byTemplate.map((t) => (
+                    <tr key={t.templateId} className="border-b border-border/50 last:border-0">
+                      <td
+                        className={
+                          PSEUDO_TEMPLATE_IDS.has(t.templateId)
+                            ? "py-2 text-muted-foreground"
+                            : "py-2"
+                        }
+                      >
+                        {t.templateName}
+                      </td>
+                      <td className="py-2 pl-3 text-right tabular-nums">{fmtNum(t.count)}</td>
+                      <td className="py-2 pl-3 text-right tabular-nums">{fmtCents(t.cents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          )}
+
           <CardContent className="overflow-x-auto">
             <table className="w-full text-sm">
               <caption className="sr-only">
@@ -127,6 +165,7 @@ export function PayoutHistory() {
               <thead>
                 <tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Date</th>
+                  <th className="pb-2 pl-3 font-medium">Template</th>
                   <th className="pb-2 pl-3 font-medium">Destination</th>
                   <th className="pb-2 pl-3 font-medium">Status</th>
                   <th className="pb-2 pl-3 text-right font-medium">Amount</th>
@@ -215,6 +254,20 @@ function PayoutRow({ payout }: { payout: Payout }) {
     <tr className="border-b border-border/50 last:border-0">
       <td className="whitespace-nowrap py-2.5 pr-4 tabular-nums">
         {dayFmt.format(new Date(payout.createdAt))}
+      </td>
+      <td
+        className={
+          PSEUDO_TEMPLATE_IDS.has(payout.templateId) || !payout.templateName
+            ? "py-2.5 pl-3 text-muted-foreground"
+            : "py-2.5 pl-3"
+        }
+      >
+        {payout.templateName ||
+          (payout.templateId === "unknown"
+            ? "unknown"
+            : payout.kind === "credits"
+              ? "pending"
+              : "—")}
       </td>
       <td className="py-2.5 pl-3 text-muted-foreground">{payout.destination}</td>
       <td className="py-2.5 pl-3">

@@ -98,6 +98,39 @@ func TestBuildPayoutHistoryExcludesVoidPayoutsButStillListsThem(t *testing.T) {
 	}
 }
 
+func TestBuildPayoutHistoryBreaksTheWindowDownByTemplate(t *testing.T) {
+	now := time.Date(2026, 8, 30, 15, 0, 0, 0, time.UTC)
+	credit := func(hoursAgo int, cents int64, status, templateID, name string) Payout {
+		at := now.Add(-time.Duration(hoursAgo) * time.Hour)
+		return Payout{ID: "c-" + at.Format(time.RFC3339Nano), CreatedAt: at, AmountCents: cents, Status: status, Kind: "credits", Destination: "Railway credits", TemplateID: templateID, TemplateName: name}
+	}
+	payouts := []Payout{
+		credit(1, 125, "COMPLETED", "twenty", "Twenty CRM"), credit(2, 13, "COMPLETED", "twenty", "Twenty CRM"),
+		credit(3, 204, "COMPLETED", "owncast", "Owncast"), credit(4, 5, "COMPLETED", "", ""),
+		credit(5, 3, "COMPLETED", unattributedTemplateID, ""),
+		credit(6, 50, "FAILED", "owncast", "Owncast"),           // void: not counted anywhere
+		credit(24*40, 999, "COMPLETED", "twenty", "Twenty CRM"), // outside the window
+		cashPayout(now.Add(-7*time.Hour), 10000, "COMPLETED"),   // cash: never attributed
+	}
+
+	got := buildPayoutHistory(payouts, 30, now)
+
+	want := []payoutTemplateTotal{
+		{TemplateID: "owncast", TemplateName: "Owncast", Count: 1, Cents: 204},
+		{TemplateID: "twenty", TemplateName: "Twenty CRM", Count: 2, Cents: 138},
+		{TemplateID: "pending", TemplateName: "pending", Count: 1, Cents: 5},
+		{TemplateID: unattributedTemplateID, TemplateName: unattributedTemplateID, Count: 1, Cents: 3},
+	}
+	if len(got.ByTemplate) != len(want) {
+		t.Fatalf("byTemplate = %+v, want %+v", got.ByTemplate, want)
+	}
+	for i := range want {
+		if got.ByTemplate[i] != want[i] {
+			t.Errorf("byTemplate[%d] = %+v, want %+v", i, got.ByTemplate[i], want[i])
+		}
+	}
+}
+
 func TestBuildPayoutHistoryCapsTableRows(t *testing.T) {
 	now := time.Date(2026, 8, 30, 15, 0, 0, 0, time.UTC)
 	payouts := []Payout{}

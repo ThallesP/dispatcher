@@ -228,6 +228,11 @@ type workspaceTemplate struct {
 	Name   string `json:"name"`
 	Code   string `json:"code"`
 	Status string `json:"status"`
+	// TotalPayout is the template's lifetime kickback in dollars as the
+	// template list reports it. It moves within the hour of a payout, whereas
+	// templateMetrics.totalEarnings can trail the ledger by many hours, so
+	// payout attribution reads this one.
+	TotalPayout float64 `json:"totalPayout"`
 }
 
 const workspaceTemplatesQuery = `query ($workspaceId: String!) {
@@ -238,6 +243,7 @@ const workspaceTemplatesQuery = `query ($workspaceId: String!) {
         name
         code
         status
+        totalPayout
       }
     }
   }

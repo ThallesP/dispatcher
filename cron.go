@@ -93,6 +93,7 @@ func runTemplateSnapshots(db *gorm.DB) {
 		log.Printf("template snapshots: %v", err)
 	}
 	runPayoutSync(db)
+	runAttribution(db)
 }
 
 // runPayoutSync mirrors Railway's payout history into DuckDB. It rides the
@@ -204,6 +205,8 @@ func templateSnapshotAt(sampledAt time.Time, template workspaceTemplate, metrics
 		Name:       template.Name,
 		Code:       template.Code,
 		Status:     template.Status,
+		// From the template list, not templateMetrics: see workspaceTemplate.
+		TotalPayout: template.TotalPayout,
 	}
 	if metrics == nil {
 		return snapshot
@@ -224,7 +227,6 @@ func templateSnapshotAt(sampledAt time.Time, template workspaceTemplate, metrics
 	snapshot.Projects = metrics.TotalDeployments
 	snapshot.RecentProjects = metrics.DeploymentsLast90Days
 	snapshot.ActiveProjects = metrics.ActiveDeployments
-	snapshot.TotalPayout = metrics.TotalEarnings
 	return snapshot
 }
 

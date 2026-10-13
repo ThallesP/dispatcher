@@ -31,7 +31,7 @@ func TestTemplateSnapshotPersistsCompleteMetrics(t *testing.T) {
 	}
 	snapshot := templateSnapshotAt(
 		time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC),
-		workspaceTemplate{ID: "template-1", Name: "Template", Code: "template", Status: "PUBLISHED"},
+		workspaceTemplate{ID: "template-1", Name: "Template", Code: "template", Status: "PUBLISHED", TotalPayout: 2411.65},
 		&metrics,
 	)
 	if err := gorm.G[TemplateSnapshot](db).Create(t.Context(), &snapshot); err != nil {
@@ -58,7 +58,7 @@ func TestTemplateSnapshotPersistsCompleteMetrics(t *testing.T) {
 		t.Errorf("health metrics were not persisted: %+v", got)
 	}
 	if got.Projects != metrics.TotalDeployments || got.ActiveProjects != metrics.ActiveDeployments ||
-		got.RecentProjects != metrics.DeploymentsLast90Days || got.TotalPayout != metrics.TotalEarnings {
+		got.RecentProjects != metrics.DeploymentsLast90Days || got.TotalPayout != 2411.65 {
 		t.Errorf("legacy compatibility fields were not mirrored: %+v", got)
 	}
 }
