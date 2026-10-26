@@ -58,6 +58,15 @@ renewed session whenever Dispatcher rotates it. Logging out drops the cookie,
 and re-registering the OAuth client invalidates every session, since the client
 secret is the encryption key.
 
+Dispatcher registers its own OAuth client with Railway on first login. When
+Railway refuses dynamic registration, or revokes the registered client
+(`invalid_client` on login), create an app by hand instead: workspace settings →
+Developer → New OAuth App, type Web, redirect URI exactly `CALLBACK_URL`. Then
+set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` on the service. On startup
+Dispatcher swaps the stored client for that one and drops the grant the old
+client issued, so everyone logs in again (CLI included), and background jobs
+resume after the first login.
+
 ## Notifications
 
 Notification targets send payout requests, template health drops, and weekly template summaries to Discord, Slack, ntfy, or a custom HTTP webhook. Targets use editable Go text/templates and can be tested before they are enabled.
