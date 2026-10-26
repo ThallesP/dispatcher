@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"os"
@@ -18,15 +17,6 @@ func main() {
 		dsn = "dispatcher.duckdb"
 	}
 	db := openDB(dsn)
-	if clientID := os.Getenv("OAUTH_CLIENT_ID"); clientID != "" {
-		clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
-		if clientSecret == "" {
-			log.Fatal("OAUTH_CLIENT_ID is set without OAUTH_CLIENT_SECRET")
-		}
-		if err := useConfiguredRailwayClient(context.Background(), db, clientID, clientSecret); err != nil {
-			log.Fatalf("use configured Railway OAuth client: %v", err)
-		}
-	}
 	startCrons(db)
 
 	mux := http.NewServeMux()

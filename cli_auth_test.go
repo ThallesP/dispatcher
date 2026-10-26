@@ -210,6 +210,54 @@ func TestBrowserAuthCallbackUsesSharedRailwayCompletion(t *testing.T) {
 	}
 }
 
+func TestBrowserLoginRegistersAgainOnceRailwayRejectsTheClient(t *testing.T) {
+	db := cliAuthTestDB(t, "rejected-client.duckdb")
+	t.Setenv("CALLBACK_URL", "https://dispatcher.example/api/auth/callback")
+	oldClient := client
+	client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case railwayTokenURL:
+			return testHTTPResponse(req, http.StatusUnauthorized,
+				`{"error":"invalid_client","error_description":"client authentication failed"}`), nil
+		case railwayRegisterURL:
+			return testHTTPResponse(req, http.StatusCreated, `{"client_id":"fresh-id","client_secret":"fresh-secret"}`), nil
+		}
+		t.Errorf("unexpected request to %s", req.URL)
+		return testHTTPResponse(req, http.StatusNotFound, `{}`), nil
+	})}
+	defer func() { client = oldClient }()
+
+	state := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32))
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?"+url.Values{
+		"code":  {"railway-code"},
+		"state": {state},
+	}.Encode(), nil)
+	req.AddCookie(&http.Cookie{Name: browserOAuthStateCookie, Value: state})
+	res := httptest.NewRecorder()
+
+	handleAuthCallback(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusFound || res.Header().Get("Location") != "/api/auth/redirect" {
+		t.Fatalf("callback: status = %d, location = %q, body = %s", res.Code, res.Header().Get("Location"), res.Body.String())
+	}
+	res = httptest.NewRecorder()
+	handleAuthRedirect(db).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/auth/redirect", nil))
+	authorizationURL, err := url.Parse(res.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clientID := authorizationURL.Query().Get("client_id"); clientID != "fresh-id" {
+		t.Fatalf("login restarted with client %q", clientID)
+	}
+	stored, err := gorm.G[RailwayCredentials](db).Find(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || stored[0].ClientID != "fresh-id" || stored[0].ClientSecret != "fresh-secret" {
+		t.Fatalf("stored clients = %+v", stored)
+	}
+}
+
 func TestCLIAuthExchangePollsThenConsumesCompletedLogin(t *testing.T) {
 	cliAuthHandoffs = cliAuthHandoffStore{entries: make(map[string]cliAuthHandoff)}
 	verifier := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))
