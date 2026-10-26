@@ -164,28 +164,20 @@ func saveToken(ctx context.Context, db *gorm.DB, id uint, tok tokenResponse) err
 	return err
 }
 
-// useConfiguredRailwayClient pins Dispatcher to an OAuth app created by hand in
-// the workspace's Developer settings, for when Railway refuses dynamic client
-// registration. A new client also drops the stored grant, which the old client
-// issued and Railway will no longer refresh, so background jobs wait for the
-// next login instead of failing on it.
-func useConfiguredRailwayClient(ctx context.Context, db *gorm.DB, clientID, clientSecret string) error {
-	creds, err := gorm.G[RailwayCredentials](db).First(ctx)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return gorm.G[RailwayCredentials](db).Create(ctx, &RailwayCredentials{ClientID: clientID, ClientSecret: clientSecret})
+// forgetRejectedRailwayClient drops the stored OAuth client once Railway
+// answers invalid_client for it (Railway revoked it), so the next login
+// registers a fresh one instead of replaying dead credentials forever. The
+// grant goes with it. Reports whether the client was dropped.
+func forgetRejectedRailwayClient(ctx context.Context, db *gorm.DB, creds RailwayCredentials, err error) bool {
+	var tokenErr *tokenError
+	if !errors.As(err, &tokenErr) || tokenErr.Code != "invalid_client" {
+		return false
 	}
-	if err != nil {
-		return err
+	if _, err := gorm.G[RailwayCredentials](db).Where("client_id = ?", creds.ClientID).Delete(ctx); err != nil {
+		log.Printf("forget rejected Railway OAuth client: %v", err)
+		return false
 	}
-	if creds.ClientID == clientID && creds.ClientSecret == clientSecret {
-		return nil
-	}
-	creds.ClientID = clientID
-	creds.ClientSecret = clientSecret
-	creds.AccessToken = ""
-	creds.RefreshToken = ""
-	creds.TokenExpiresAt = time.Time{}
-	return db.WithContext(ctx).Save(&creds).Error
+	return true
 }
 
 // workspaceToken returns a valid access token for background work,

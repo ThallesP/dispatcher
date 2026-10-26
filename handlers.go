@@ -80,6 +80,13 @@ func handleAuthCallback(db *gorm.DB) http.HandlerFunc {
 
 		tok, authErr := completeRailwayAuth(r.Context(), db, creds, code)
 		if authErr != nil {
+			// The code belongs to the rejected client, so a browser goes back
+			// through consent with the one /api/auth/redirect registers next.
+			// A CLI login still fails, and its next attempt registers one.
+			if forgetRejectedRailwayClient(r.Context(), db, creds, authErr.Err) && cliState == nil {
+				http.Redirect(w, r, "/api/auth/redirect", http.StatusFound)
+				return
+			}
 			writeRailwayAuthFailure(w, cliState, authErr)
 			return
 		}

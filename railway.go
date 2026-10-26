@@ -85,6 +85,19 @@ type tokenResponse struct {
 	Scope        string `json:"scope"`
 }
 
+// tokenError is a refusal from Railway's token endpoint. Code is the OAuth
+// error from the body: invalid_client means Railway no longer recognises the
+// client, whatever grant came with it.
+type tokenError struct {
+	Status string `json:"-"`
+	Body   []byte `json:"-"`
+	Code   string `json:"error"`
+}
+
+func (e *tokenError) Error() string {
+	return fmt.Sprintf("railway oauth token: %s: %s", e.Status, e.Body)
+}
+
 func exchangeAuthCode(ctx context.Context, creds RailwayCredentials, code string) (tokenResponse, error) {
 	return requestToken(ctx, creds, url.Values{
 		"grant_type":   {"authorization_code"},
@@ -118,7 +131,9 @@ func requestToken(ctx context.Context, creds RailwayCredentials, form url.Values
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return tokenResponse{}, fmt.Errorf("railway oauth token: %s: %s", resp.Status, body)
+		tokenErr := &tokenError{Status: resp.Status, Body: body}
+		json.Unmarshal(body, tokenErr)
+		return tokenResponse{}, tokenErr
 	}
 
 	var tok tokenResponse
