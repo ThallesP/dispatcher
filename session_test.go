@@ -295,3 +295,42 @@ func TestConcurrentRequestsRefreshTheGrantOnce(t *testing.T) {
 		t.Fatalf("refreshes = %d, want 1", refreshes)
 	}
 }
+
+func TestConfiguredClientReplacesTheOneRailwayRevoked(t *testing.T) {
+	db := cliAuthTestDB(t, "configured-client.duckdb")
+	creds, err := gorm.G[RailwayCredentials](db).First(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveToken(t.Context(), db, creds.ID, tokenResponse{AccessToken: "old-access", RefreshToken: "old-refresh", ExpiresIn: 3600}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := useConfiguredRailwayClient(t.Context(), db, "client-id", "client-secret"); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := gorm.G[RailwayCredentials](db).First(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.RefreshToken != "old-refresh" {
+		t.Fatalf("same client dropped its grant: %+v", kept)
+	}
+
+	if err := useConfiguredRailwayClient(t.Context(), db, "manual-id", "manual-secret"); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := gorm.G[RailwayCredentials](db).First(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.ID != creds.ID || replaced.ClientID != "manual-id" || replaced.ClientSecret != "manual-secret" {
+		t.Fatalf("client not replaced: %+v", replaced)
+	}
+	if replaced.AccessToken != "" || replaced.RefreshToken != "" {
+		t.Fatalf("grant from the revoked client survived: %+v", replaced)
+	}
+	if _, err := workspaceToken(t.Context(), db); err == nil {
+		t.Fatal("background jobs should wait for a login with the new client")
+	}
+}

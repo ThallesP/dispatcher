@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -161,6 +162,30 @@ func saveToken(ctx context.Context, db *gorm.DB, id uint, tok tokenResponse) err
 		TokenExpiresAt: time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
 	})
 	return err
+}
+
+// useConfiguredRailwayClient pins Dispatcher to an OAuth app created by hand in
+// the workspace's Developer settings, for when Railway refuses dynamic client
+// registration. A new client also drops the stored grant, which the old client
+// issued and Railway will no longer refresh, so background jobs wait for the
+// next login instead of failing on it.
+func useConfiguredRailwayClient(ctx context.Context, db *gorm.DB, clientID, clientSecret string) error {
+	creds, err := gorm.G[RailwayCredentials](db).First(ctx)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return gorm.G[RailwayCredentials](db).Create(ctx, &RailwayCredentials{ClientID: clientID, ClientSecret: clientSecret})
+	}
+	if err != nil {
+		return err
+	}
+	if creds.ClientID == clientID && creds.ClientSecret == clientSecret {
+		return nil
+	}
+	creds.ClientID = clientID
+	creds.ClientSecret = clientSecret
+	creds.AccessToken = ""
+	creds.RefreshToken = ""
+	creds.TokenExpiresAt = time.Time{}
+	return db.WithContext(ctx).Save(&creds).Error
 }
 
 // workspaceToken returns a valid access token for background work,
